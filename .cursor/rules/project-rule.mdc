@@ -1,0 +1,9 @@
+---
+alwaysApply: true
+---
+Reference the Following document to stay on track:
+/prd.md
+Always make components in the components section and reuse it rather than making a new component every time
+Do not use emojis, prefer icons over emojis
+Do not use AI based colors like - blue purple etc ... they look very AI-ish
+Do not create .md file unnecessarily on your own (documentation etc), unless asked to do so.
