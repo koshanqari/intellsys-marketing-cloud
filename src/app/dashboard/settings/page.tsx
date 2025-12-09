@@ -66,7 +66,7 @@ export default function SettingsPage() {
     { key: 'SENT', label: 'Sent', description: 'Message sent successfully' },
     { key: 'DELIVERED', label: 'Delivered', description: 'Message delivered to device' },
     { key: 'READ', label: 'Read', description: 'Message read by recipient' },
-    { key: 'REPLIED', label: 'Replied', description: 'User replied to message' },
+    { key: 'REPLIED', label: 'Action', description: 'User replied to message' },
     { key: 'PENDING', label: 'Pending', description: 'Those with no status' },
     { key: 'FAILED', label: 'Failed', description: 'Message failed to deliver' },
   ];

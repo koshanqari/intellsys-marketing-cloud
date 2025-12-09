@@ -760,7 +760,7 @@ export default function TemplateDetail({
 
       {/* Stats Grid */}
       <div className="space-y-4 mb-8">
-        {/* Row 1: Sent, Delivered, Read, Replied */}
+        {/* Row 1: Sent, Delivered, Read, Action */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             title="Sent"
@@ -784,7 +784,7 @@ export default function TemplateDetail({
             customColor={statusColors && statusColors['READ'] ? String(statusColors['READ']) : undefined}
           />
           <StatCard
-            title="Replied"
+            title="Action"
             value={summary.replied}
             icon={<MessageSquare className="w-5 h-5" />}
             variant="default"
