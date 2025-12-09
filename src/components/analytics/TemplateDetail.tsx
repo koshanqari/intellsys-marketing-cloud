@@ -659,8 +659,6 @@ export default function TemplateDetail({
   }
 
   const { summary, statusCodeMappings, statusMappings, statusColors = {} } = data;
-  const deliveryRate = summary.total_contacts > 0 ? Math.round((summary.delivered / summary.total_contacts) * 100) : 0;
-  const readRate = summary.total_contacts > 0 ? Math.round((summary.read / summary.total_contacts) * 100) : 0;
 
   return (
     <div className="p-8">
@@ -722,40 +720,36 @@ export default function TemplateDetail({
             <div className="flex items-center gap-2">
               <Button
                 type="button"
-                variant="ghost"
+                variant={activePreset === 'today' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={() => setDatePreset('today')}
-                className={activePreset === 'today' ? 'bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]' : ''}
               >
                 Today
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant={activePreset === 'week' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={() => setDatePreset('week')}
-                className={activePreset === 'week' ? 'bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]' : ''}
               >
                 Last 7 Days
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant={activePreset === 'month' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={() => setDatePreset('month')}
-                className={activePreset === 'month' ? 'bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]' : ''}
               >
                 Last 30 Days
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant={activePreset === 'all' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={() => {
                   setStartDate('');
                   setEndDate('');
                 }}
-                className={activePreset === 'all' ? 'bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]' : ''}
               >
                 All Time
               </Button>
@@ -778,7 +772,6 @@ export default function TemplateDetail({
           <StatCard
             title="Delivered"
             value={summary.delivered}
-            subtitle={`${deliveryRate}%`}
             icon={<CheckCircle2 className="w-5 h-5" />}
             variant="success"
             customColor={statusColors && statusColors['DELIVERED'] ? String(statusColors['DELIVERED']) : undefined}
@@ -786,7 +779,6 @@ export default function TemplateDetail({
           <StatCard
             title="Read"
             value={summary.read}
-            subtitle={`${readRate}%`}
             icon={<Eye className="w-5 h-5" />}
             variant="default"
             customColor={statusColors && statusColors['READ'] ? String(statusColors['READ']) : undefined}
