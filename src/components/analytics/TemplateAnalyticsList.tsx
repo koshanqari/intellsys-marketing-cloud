@@ -13,18 +13,10 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 
-interface TemplateStats {
-  template_name: string;
-  total: number;
-  delivered: number;
-  read: number;
-  failed: number;
-}
-
 interface AnalyticsData {
   clientId: string;
   clientName: string;
-  templateStats: TemplateStats[];
+  templateNames: string[];
 }
 
 interface TemplateAnalyticsListProps {
@@ -76,8 +68,8 @@ export default function TemplateAnalyticsList({
     fetchAnalytics();
   }, []);
 
-  const filteredTemplates = data?.templateStats.filter(template =>
-    template.template_name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredTemplates = data?.templateNames.filter(templateName =>
+    templateName.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
   const handleTemplateClick = (templateName: string) => {
@@ -162,61 +154,39 @@ export default function TemplateAnalyticsList({
             </p>
           </Card>
         ) : (
-          filteredTemplates.map((template) => {
-            const deliveryRate = template.total > 0 
-              ? Math.round((template.delivered / template.total) * 100) 
-              : 0;
-            const readRate = template.total > 0 
-              ? Math.round((template.read / template.total) * 100) 
-              : 0;
-
-            return (
-              <Card
-                key={template.template_name}
-                className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
-                onClick={() => handleTemplateClick(template.template_name)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
-                        {template.template_name}
-                      </h3>
-                      <div className="flex items-center gap-4 mt-1">
-                        <span className="text-sm text-[var(--neutral-600)]">
-                          {template.total.toLocaleString()} sent
-                        </span>
-                        <span className="text-sm text-[var(--success)]">
-                          {template.delivered.toLocaleString()} delivered ({deliveryRate}%)
-                        </span>
-                        <span className="text-sm text-[var(--primary)]">
-                          {template.read.toLocaleString()} read ({readRate}%)
-                        </span>
-                        {template.failed > 0 && (
-                          <span className="text-sm text-[var(--error)]">
-                            {template.failed.toLocaleString()} failed
-                          </span>
-                        )}
-                      </div>
-                    </div>
+          filteredTemplates.map((templateName) => (
+            <Card
+              key={templateName}
+              className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
+              onClick={() => handleTemplateClick(templateName)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
+                    <FileText className="w-5 h-5" />
                   </div>
-                  <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
-                    <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
+                  <div>
+                    <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
+                      {templateName}
+                    </h3>
+                    <p className="text-sm text-[var(--neutral-500)] mt-1">
+                      Click to view analytics
+                    </p>
                   </div>
                 </div>
-              </Card>
-            );
-          })
+                <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
+                  <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
+                </div>
+              </div>
+            </Card>
+          ))
         )}
       </div>
 
       {/* Summary */}
       {filteredTemplates.length > 0 && (
         <p className="mt-4 text-sm text-[var(--neutral-400)]">
-          Showing {filteredTemplates.length} of {data.templateStats.length} templates
+          Showing {filteredTemplates.length} of {data.templateNames.length} templates
         </p>
       )}
     </div>

@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { getSession, getClientUserSession } from '@/lib/auth';
 import { getClientById, updateClient } from '@/lib/queries';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await getSession();
+  const adminSession = await getSession();
+  const clientUserSession = await getClientUserSession();
   
-  if (!session) {
+  if (!adminSession && !clientUserSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { clientId } = await params;
+
+  // Client users can only access their own client
+  if (clientUserSession && clientUserSession.client_id !== clientId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   try {
     const client = await getClientById(clientId);
@@ -35,13 +41,19 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await getSession();
+  const adminSession = await getSession();
+  const clientUserSession = await getClientUserSession();
   
-  if (!session) {
+  if (!adminSession && !clientUserSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { clientId } = await params;
+
+  // Client users can only update their own client
+  if (clientUserSession && clientUserSession.client_id !== clientId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   try {
     const body = await request.json();
@@ -56,6 +68,9 @@ export async function PATCH(
       sms_enabled: body.sms_enabled,
       email_enabled: body.email_enabled,
       status: body.status,
+      status_mappings: body.status_mappings,
+      status_code_mappings: body.status_code_mappings,
+      status_colors: body.status_colors,
     });
 
     return NextResponse.json(client);

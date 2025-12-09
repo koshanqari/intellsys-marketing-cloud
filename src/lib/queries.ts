@@ -15,6 +15,9 @@ export async function getClientsFromTable(): Promise<Client[]> {
       c.sms_enabled,
       c.email_enabled,
       c.status,
+      COALESCE(c.status_mappings, '{}'::jsonb) as status_mappings,
+      COALESCE(c.status_code_mappings, '{}'::jsonb) as status_code_mappings,
+      COALESCE(c.status_colors, '{}'::jsonb) as status_colors,
       c.created_at,
       c.updated_at,
       COALESCE(m.total_messages, 0)::int as total_messages
@@ -42,6 +45,9 @@ export async function getClientById(clientId: string): Promise<Client | null> {
       c.sms_enabled,
       c.email_enabled,
       c.status,
+      COALESCE(c.status_mappings, '{}'::jsonb) as status_mappings,
+      COALESCE(c.status_code_mappings, '{}'::jsonb) as status_code_mappings,
+      COALESCE(c.status_colors, '{}'::jsonb) as status_colors,
       c.created_at,
       c.updated_at,
       COALESCE(m.total_messages, 0)::int as total_messages
@@ -61,12 +67,41 @@ export async function createClient(data: {
   phone?: string;
   industry?: string;
 }): Promise<Client> {
+  // Default status mappings
+  const defaultStatusMappings = {
+    SENT: 'sent,Sent,SENT',
+    DELIVERED: 'delivered,Delivered,DELIVERED',
+    READ: 'read,Read,READ',
+    REPLIED: 'replied,Replied,REPLIED',
+    FAILED: 'failed,Failed,FAILED',
+    PENDING: '', // Pending is for messages with no status (NULL), so no mapping needed
+  };
+
+  // Default status code mappings
+  const defaultStatusCodeMappings = {
+    SUCCESS: '200,201,202',
+    CLIENT_ERROR: '400,401,403,404',
+    SERVER_ERROR: '500,502,503',
+  };
+
   const result = await queryOne<Client>(`
-    INSERT INTO app.clients (name, email, phone, industry)
-    VALUES ($1, $2, $3, $4)
-    RETURNING *
-  `, [data.name, data.email || null, data.phone || null, data.industry || null]);
-  
+    INSERT INTO app.clients (name, email, phone, industry, status_mappings, status_code_mappings)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+    RETURNING 
+      id, name, email, phone, industry, logo_url,
+      whatsapp_enabled, sms_enabled, email_enabled, status,
+      COALESCE(status_mappings, '{}'::jsonb) as status_mappings,
+      COALESCE(status_code_mappings, '{}'::jsonb) as status_code_mappings,
+      created_at, updated_at
+  `, [
+    data.name, 
+    data.email || null, 
+    data.phone || null, 
+    data.industry || null,
+    JSON.stringify(defaultStatusMappings),
+    JSON.stringify(defaultStatusCodeMappings),
+  ]);
+
   if (!result) throw new Error('Failed to create client');
   return result;
 }
@@ -81,6 +116,9 @@ export async function updateClient(clientId: string, data: {
   sms_enabled?: boolean;
   email_enabled?: boolean;
   status?: string;
+  status_mappings?: Record<string, string> | null;
+  status_code_mappings?: Record<string, string> | null;
+  status_colors?: Record<string, string> | null;
 }): Promise<Client> {
   const updates: string[] = [];
   const values: unknown[] = [];
@@ -122,6 +160,18 @@ export async function updateClient(clientId: string, data: {
     updates.push(`status = $${paramIndex++}`);
     values.push(data.status);
   }
+  if (data.status_mappings !== undefined) {
+    updates.push(`status_mappings = $${paramIndex++}`);
+    values.push(data.status_mappings ? JSON.stringify(data.status_mappings) : '{}');
+  }
+  if (data.status_code_mappings !== undefined) {
+    updates.push(`status_code_mappings = $${paramIndex++}`);
+    values.push(data.status_code_mappings ? JSON.stringify(data.status_code_mappings) : '{}');
+  }
+  if (data.status_colors !== undefined) {
+    updates.push(`status_colors = $${paramIndex++}`);
+    values.push(data.status_colors ? JSON.stringify(data.status_colors) : '{}');
+  }
 
   values.push(clientId);
 
@@ -129,8 +179,23 @@ export async function updateClient(clientId: string, data: {
     UPDATE app.clients
     SET ${updates.join(', ')}
     WHERE id = $${paramIndex}
-    RETURNING *
+    RETURNING 
+      id, name, email, phone, industry, logo_url,
+      whatsapp_enabled, sms_enabled, email_enabled, status,
+      COALESCE(status_mappings, '{}'::jsonb) as status_mappings,
+      COALESCE(status_code_mappings, '{}'::jsonb) as status_code_mappings,
+      COALESCE(status_colors, '{}'::jsonb) as status_colors,
+      created_at, updated_at
   `, values);
+  
+  // Ensure status_colors is properly parsed
+  if (result && result.status_colors && typeof result.status_colors === 'string') {
+    try {
+      result.status_colors = JSON.parse(result.status_colors);
+    } catch {
+      result.status_colors = {};
+    }
+  }
 
   if (!result) throw new Error('Failed to update client');
   return result;
@@ -146,32 +211,53 @@ export async function getAnalyticsSummary(clientId: string, startDate?: string, 
   }
 
   const result = await queryOne<{
-    total_messages: string;
+    total_contacts: string;
+    sent: string;
     delivered: string;
     read: string;
+    replied: string;
     failed: string;
+    pending: string;
   }>(`
     SELECT 
-      COUNT(*)::int as total_messages,
-      COUNT(CASE WHEN message_status = 'delivered' OR message_status = 'read' THEN 1 END)::int as delivered,
-      COUNT(CASE WHEN message_status = 'read' THEN 1 END)::int as read,
-      COUNT(CASE WHEN status_code != 200 OR message_status IS NULL THEN 1 END)::int as failed
+      COUNT(*)::int as total_contacts,
+      COUNT(CASE 
+        WHEN LOWER(message_status) IN ('sent', 'delivered', 'read', 'replied') 
+        OR message_status IN ('sent', 'delivered', 'read', 'replied')
+        THEN 1 
+      END)::int as sent,
+      COUNT(CASE 
+        WHEN LOWER(message_status) = 'delivered' OR message_status = 'delivered'
+        THEN 1 
+      END)::int as delivered,
+      COUNT(CASE 
+        WHEN LOWER(message_status) = 'read' OR message_status = 'read'
+        THEN 1 
+      END)::int as read,
+      COUNT(CASE 
+        WHEN LOWER(message_status) = 'replied' OR message_status = 'replied'
+        THEN 1 
+      END)::int as replied,
+      COUNT(CASE 
+        WHEN LOWER(message_status) = 'failed' OR message_status = 'failed'
+        THEN 1 
+      END)::int as failed,
+      COUNT(CASE 
+        WHEN message_status IS NULL
+        THEN 1 
+      END)::int as pending
     FROM app.message_logs
     WHERE client_id = $1 ${dateFilter}
   `, params);
 
-  const total = parseInt(result?.total_messages || '0');
-  const delivered = parseInt(result?.delivered || '0');
-  const read = parseInt(result?.read || '0');
-  const failed = parseInt(result?.failed || '0');
-
   return {
-    total_messages: total,
-    delivered,
-    read,
-    failed,
-    delivery_rate: total > 0 ? Math.round((delivered / total) * 100) : 0,
-    read_rate: total > 0 ? Math.round((read / total) * 100) : 0,
+    total_contacts: parseInt(result?.total_contacts || '0'),
+    sent: parseInt(result?.sent || '0'),
+    delivered: parseInt(result?.delivered || '0'),
+    read: parseInt(result?.read || '0'),
+    replied: parseInt(result?.replied || '0'),
+    failed: parseInt(result?.failed || '0'),
+    pending: parseInt(result?.pending || '0'),
   };
 }
 

@@ -34,7 +34,9 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/clients');
+      // Redirect based on user type
+      const redirectPath = data.redirectTo || '/clients';
+      router.push(redirectPath);
     } catch {
       setError('An error occurred. Please try again.');
     } finally {
@@ -64,7 +66,10 @@ export default function LoginPage() {
             Intellsys Marketing Cloud
           </h1>
           <p className="mt-2 text-[var(--neutral-600)]">
-            Sign in to access the dashboard
+            Sign in to access your dashboard
+          </p>
+          <p className="mt-1 text-sm text-[var(--neutral-500)]">
+            Use your email or admin username
           </p>
         </div>
 
@@ -77,11 +82,11 @@ export default function LoginPage() {
               </div>
               <Input
                 id="username"
-                label="Username"
+                label="Username or Email"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
+                placeholder="Enter your username or email"
                 className="pl-10"
                 required
               />

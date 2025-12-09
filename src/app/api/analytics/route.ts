@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentClient } from '@/lib/auth';
+import { getSession, getCurrentClient, getClientUserSession } from '@/lib/auth';
 import { 
   getAnalyticsSummary, 
   getTemplateStats, 
@@ -8,16 +8,31 @@ import {
 } from '@/lib/queries';
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  // Check for either super admin session or client user session
+  const adminSession = await getSession();
+  const clientUserSession = await getClientUserSession();
   
-  if (!session) {
+  if (!adminSession && !clientUserSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const clientId = await getCurrentClient();
+  // Get client ID - from client user session or from admin's selected client
+  let clientId: string | null = null;
   
+  if (clientUserSession) {
+    // Client user - use their client_id
+    clientId = clientUserSession.client_id;
+  } else if (adminSession) {
+    // Super admin - get selected client
+    clientId = await getCurrentClient();
+    if (!clientId) {
+      return NextResponse.json({ error: 'No client selected' }, { status: 400 });
+    }
+  }
+
+  // Final check - clientId should never be null at this point, but TypeScript needs this
   if (!clientId) {
-    return NextResponse.json({ error: 'No client selected' }, { status: 400 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -25,18 +40,14 @@ export async function GET(request: NextRequest) {
   const endDate = searchParams.get('endDate') || undefined;
 
   try {
-    const [client, summary, templateStats, templateNames] = await Promise.all([
+    const [client, templateNames] = await Promise.all([
       getClientById(clientId),
-      getAnalyticsSummary(clientId, startDate, endDate),
-      getTemplateStats(clientId, startDate, endDate),
       getTemplateNames(clientId),
     ]);
 
     return NextResponse.json({
       clientId,
       clientName: client?.name || 'Unknown',
-      summary,
-      templateStats,
       templateNames,
     });
   } catch (error) {

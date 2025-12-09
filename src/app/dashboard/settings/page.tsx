@@ -5,21 +5,7 @@ import { useRouter } from 'next/navigation';
 import { 
   Save,
   RefreshCw,
-  AlertCircle,
-  Copy,
-  Check,
-  MessageSquare,
-  Mail,
-  Smartphone,
-  Plus,
-  Trash2,
-  Link as LinkIcon,
-  Eye,
-  EyeOff,
-  Users,
-  Pencil,
-  UserCheck,
-  UserX
+  AlertCircle
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -37,84 +23,116 @@ interface Client {
   sms_enabled: boolean;
   email_enabled: boolean;
   status: string;
+  status_mappings: Record<string, string> | null;
+  status_code_mappings: Record<string, string> | null;
+  status_colors: Record<string, string> | null;
   created_at: string;
   updated_at: string;
   total_messages: number;
 }
 
-interface ClientUser {
-  id: string;
-  email: string;
-  name: string | null;
-  role: string;
-  permissions: {
-    analytics: boolean;
-    templates: boolean;
-    settings: boolean;
-  };
-  is_active: boolean;
-  last_login: string | null;
-  created_at: string;
-}
 
 export default function SettingsPage() {
   const router = useRouter();
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [userPermissions, setUserPermissions] = useState<{ settings: boolean; client_settings?: boolean } | null>(null);
   const [client, setClient] = useState<Client | null>(null);
-  const [users, setUsers] = useState<ClientUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // User modal state (create)
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [userError, setUserError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [newUser, setNewUser] = useState({
-    email: '',
-    password: '',
-    name: '',
-    permissions: {
-      analytics: true,
-      templates: false,
-      settings: false,
-    },
-  });
+  // Delivery status mappings state - maps main status to comma-separated incoming values
+  // Format: { "DELIVERED": "delivered,Delivered", "READ": "read,Read" }
+  const [statusMappings, setStatusMappings] = useState<Record<string, string>>({});
+  
+  // Status code mappings state - maps status code categories to comma-separated codes
+  // Format: { "SUCCESS": "200,201,202", "CLIENT_ERROR": "400,401,403,404" }
+  const [statusCodeMappings, setStatusCodeMappings] = useState<Record<string, string>>({});
+  
+  // Status colors state - custom colors for each delivery status
+  // Format: { "SENT": "#3B82F6", "DELIVERED": "#10B981" }
+  const [statusColors, setStatusColors] = useState<Record<string, string>>({});
+  
+  // Status code colors state - custom colors for each HTTP status code category
+  // Format: { "SUCCESS": "#10B981", "CLIENT_ERROR": "#EF4444" }
+  const [statusCodeColors, setStatusCodeColors] = useState<Record<string, string>>({});
+  
+  // Reset confirmation modal state
+  const [showResetModal, setShowResetModal] = useState(false);
+  
+  // Main delivery statuses for analytics
+  const MAIN_STATUSES = [
+    { key: 'SENT', label: 'Sent', description: 'Message sent successfully' },
+    { key: 'DELIVERED', label: 'Delivered', description: 'Message delivered to device' },
+    { key: 'READ', label: 'Read', description: 'Message read by recipient' },
+    { key: 'REPLIED', label: 'Replied', description: 'User replied to message' },
+    { key: 'PENDING', label: 'Pending', description: 'Those with no status' },
+    { key: 'FAILED', label: 'Failed', description: 'Message failed to deliver' },
+  ];
 
-  // Edit user modal state
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<ClientUser | null>(null);
-  const [editUserData, setEditUserData] = useState({
-    email: '',
-    password: '',
-    name: '',
-    permissions: {
-      analytics: true,
-      templates: false,
-      settings: false,
-    },
-  });
-  const [updatingUser, setUpdatingUser] = useState(false);
-  const [editUserError, setEditUserError] = useState('');
-  const [showEditPassword, setShowEditPassword] = useState(false);
+  // Status code categories
+  const STATUS_CODE_CATEGORIES = [
+    { key: 'SUCCESS', label: 'Success', description: 'Successful request (e.g., 200, 201, 202)' },
+    { key: 'CLIENT_ERROR', label: 'Client Error', description: 'Client-side errors (4xx codes)' },
+    { key: 'SERVER_ERROR', label: 'Server Error', description: 'Server-side errors (5xx codes)' },
+  ];
 
-  // Form state
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    industry: '',
-    whatsapp_enabled: true,
-    sms_enabled: false,
-    email_enabled: false,
-  });
+  // Default status mappings
+  const DEFAULT_STATUS_MAPPINGS: Record<string, string> = {
+    SENT: 'sent,Sent,SENT',
+    DELIVERED: 'delivered,Delivered,DELIVERED',
+    READ: 'read,Read,READ',
+    REPLIED: 'replied,Replied,REPLIED',
+    FAILED: 'failed,Failed,FAILED',
+    PENDING: '', // Pending is for messages with no status (NULL), so no mapping needed
+  };
+
+  // Default status code mappings
+  const DEFAULT_STATUS_CODE_MAPPINGS: Record<string, string> = {
+    SUCCESS: '200,201,202',
+    CLIENT_ERROR: '400,401,403,404',
+    SERVER_ERROR: '500,502,503',
+  };
+
+  // Default status colors
+  const DEFAULT_STATUS_COLORS: Record<string, string> = {
+    SENT: '#3B82F6',      // Blue
+    DELIVERED: '#10B981', // Green
+    READ: '#6366F1',      // Indigo
+    REPLIED: '#8B5CF6',   // Purple
+    PENDING: '#F59E0B',   // Amber
+    FAILED: '#EF4444',    // Red
+  };
+
+  // Default status code colors
+  const DEFAULT_STATUS_CODE_COLORS: Record<string, string> = {
+    SUCCESS: '#10B981',      // Green
+    CLIENT_ERROR: '#F59E0B', // Amber
+    SERVER_ERROR: '#EF4444', // Red
+  };
 
   useEffect(() => {
     fetchData();
+    checkUserRole();
   }, []);
+
+  const checkUserRole = async () => {
+    try {
+      // Check if user is super admin or client user
+      const response = await fetch('/api/auth/session');
+      if (response.ok) {
+        const data = await response.json();
+        const isAdmin = data.isAdmin || false;
+        setIsSuperAdmin(isAdmin);
+        if (data.permissions) {
+          setUserPermissions(data.permissions);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking user role:', error);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -127,7 +145,8 @@ export default function SettingsPage() {
           return;
         }
         if (analyticsResponse.status === 400) {
-          router.push('/clients');
+          // Only super admin can access /clients
+          router.push('/login');
           return;
         }
         throw new Error('Failed to get current client');
@@ -136,11 +155,8 @@ export default function SettingsPage() {
       const analyticsData = await analyticsResponse.json();
       const clientId = analyticsData.clientId;
 
-      // Fetch client details and users in parallel
-      const [clientResponse, usersResponse] = await Promise.all([
-        fetch(`/api/clients/${clientId}`),
-        fetch('/api/client-users'),
-      ]);
+      // Fetch client details
+      const clientResponse = await fetch(`/api/clients/${clientId}`);
       
       if (!clientResponse.ok) {
         throw new Error('Failed to fetch client');
@@ -148,20 +164,36 @@ export default function SettingsPage() {
 
       const clientData = await clientResponse.json();
       setClient(clientData);
-      setFormData({
-        name: clientData.name || '',
-        email: clientData.email || '',
-        phone: clientData.phone || '',
-        industry: clientData.industry || '',
-        whatsapp_enabled: clientData.whatsapp_enabled,
-        sms_enabled: clientData.sms_enabled,
-        email_enabled: clientData.email_enabled,
+      // Initialize delivery status mappings - use defaults if empty
+      const existingMappings = clientData.status_mappings || {};
+      const initializedMappings: Record<string, string> = {};
+      MAIN_STATUSES.forEach(status => {
+        initializedMappings[status.key] = existingMappings[status.key] || DEFAULT_STATUS_MAPPINGS[status.key] || '';
       });
+      setStatusMappings(initializedMappings);
 
-      if (usersResponse.ok) {
-        const usersData = await usersResponse.json();
-        setUsers(usersData);
-      }
+      // Initialize status code mappings - use defaults if empty
+      const existingCodeMappings = clientData.status_code_mappings || {};
+      const initializedCodeMappings: Record<string, string> = {};
+      STATUS_CODE_CATEGORIES.forEach(category => {
+        initializedCodeMappings[category.key] = existingCodeMappings[category.key] || DEFAULT_STATUS_CODE_MAPPINGS[category.key] || '';
+      });
+      setStatusCodeMappings(initializedCodeMappings);
+
+      // Initialize status colors - use defaults if empty
+      const existingColors = clientData.status_colors || {};
+      const initializedColors: Record<string, string> = {};
+      MAIN_STATUSES.forEach(status => {
+        initializedColors[status.key] = existingColors[status.key] || DEFAULT_STATUS_COLORS[status.key] || '#6B7280';
+      });
+      setStatusColors(initializedColors);
+
+      // Initialize status code colors - use defaults if empty
+      const initializedCodeColors: Record<string, string> = {};
+      STATUS_CODE_CATEGORIES.forEach(category => {
+        initializedCodeColors[category.key] = existingColors[`CODE_${category.key}`] || DEFAULT_STATUS_CODE_COLORS[category.key] || '#6B7280';
+      });
+      setStatusCodeColors(initializedCodeColors);
     } catch (error) {
       console.error('Error fetching data:', error);
       setError('Failed to load client settings');
@@ -179,10 +211,25 @@ export default function SettingsPage() {
     setSuccess('');
 
     try {
+      // Combine status colors and status code colors
+      const combinedColors = {
+        ...statusColors,
+        ...Object.fromEntries(
+          Object.entries(statusCodeColors).map(([key, value]) => [`CODE_${key}`, value])
+        ),
+      };
+
+      console.log('Saving colors:', combinedColors);
+      console.log('REPLIED color being saved:', combinedColors['REPLIED']);
+
       const response = await fetch(`/api/clients/${client.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          status_mappings: statusMappings,
+          status_code_mappings: statusCodeMappings,
+          status_colors: combinedColors,
+        }),
       });
 
       if (!response.ok) {
@@ -202,151 +249,6 @@ export default function SettingsPage() {
     }
   };
 
-  const copyClientId = () => {
-    if (client) {
-      navigator.clipboard.writeText(client.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const copyPortalLink = () => {
-    const link = `${window.location.origin}/portal/login`;
-    navigator.clipboard.writeText(link);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUserError('');
-    setCreatingUser(true);
-
-    try {
-      const response = await fetch('/api/client-users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setUserError(data.error || 'Failed to create user');
-        return;
-      }
-
-      setUsers([data, ...users]);
-      setNewUser({
-        email: '',
-        password: '',
-        name: '',
-        permissions: { analytics: true, templates: false, settings: false },
-      });
-      setShowUserModal(false);
-    } catch {
-      setUserError('An error occurred. Please try again.');
-    } finally {
-      setCreatingUser(false);
-    }
-  };
-
-  const handleEditUser = (user: ClientUser) => {
-    setEditingUser(user);
-    setEditUserData({
-      email: user.email,
-      password: '', // Leave empty - only update if user enters new password
-      name: user.name || '',
-      permissions: { ...user.permissions },
-    });
-    setEditUserError('');
-    setShowEditPassword(false);
-    setShowEditModal(true);
-  };
-
-  const handleUpdateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
-
-    setEditUserError('');
-    setUpdatingUser(true);
-
-    try {
-      const updateData: Record<string, unknown> = {
-        name: editUserData.name,
-        permissions: editUserData.permissions,
-      };
-
-      // Only include email if it changed
-      if (editUserData.email !== editingUser.email) {
-        updateData.email = editUserData.email;
-      }
-
-      // Only include password if provided
-      if (editUserData.password) {
-        updateData.password = editUserData.password;
-      }
-
-      const response = await fetch(`/api/client-users/${editingUser.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updateData),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setEditUserError(data.error || 'Failed to update user');
-        return;
-      }
-
-      setUsers(users.map(u => u.id === editingUser.id ? data : u));
-      setShowEditModal(false);
-      setEditingUser(null);
-    } catch {
-      setEditUserError('An error occurred. Please try again.');
-    } finally {
-      setUpdatingUser(false);
-    }
-  };
-
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
-
-    try {
-      const response = await fetch(`/api/client-users/${userId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete user');
-      }
-
-      setUsers(users.filter(u => u.id !== userId));
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('Failed to delete user');
-    }
-  };
-
-  const handleToggleUserActive = async (user: ClientUser) => {
-    try {
-      const response = await fetch(`/api/client-users/${user.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !user.is_active }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update user');
-      }
-
-      const updatedUser = await response.json();
-      setUsers(users.map(u => u.id === user.id ? updatedUser : u));
-    } catch (error) {
-      console.error('Error updating user:', error);
-    }
-  };
 
   if (loading) {
     return (
@@ -374,546 +276,290 @@ export default function SettingsPage() {
     );
   }
 
+  // Check RBAC - only show if user has settings permission
+  const canViewSettings = isSuperAdmin || (userPermissions?.settings === true);
+
+  if (!canViewSettings) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[60vh]">
+        <Card className="text-center py-12 max-w-md">
+          <AlertCircle className="w-12 h-12 mx-auto text-[var(--error)] mb-4" />
+          <h2 className="text-lg font-medium text-[var(--neutral-900)]">Access Denied</h2>
+          <p className="mt-1 text-[var(--neutral-600)]">You don't have permission to access this page.</p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-8 max-w-4xl">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-[var(--neutral-900)]">Client Settings</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold text-[var(--neutral-900)]">Settings</h1>
         <p className="mt-1 text-[var(--neutral-600)]">
-          Manage settings for <span className="font-medium text-[var(--primary)]">{client.name}</span>
+          Configure delivery status and HTTP status code mappings for <span className="font-medium text-[var(--primary)]">{client.name}</span>
         </p>
       </div>
 
-      {/* Client ID Card */}
-      <Card className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-medium text-[var(--neutral-600)]">Client ID (UUID)</h3>
-            <p className="mt-1 text-lg font-mono font-semibold text-[var(--neutral-900)] break-all">
-              {client.id}
+      {/* Settings Content */}
+      <div className="space-y-6">
+        <Card>
+          <form onSubmit={handleSave} className="space-y-6">
+            {/* Delivery Status Configuration */}
+            <div className="pt-4 border-t border-[var(--neutral-200)] first:pt-0 first:border-t-0">
+            <h4 className="text-sm font-medium text-[var(--neutral-700)] mb-2">Delivery Status Configuration</h4>
+            <p className="text-xs text-[var(--neutral-500)] mb-4">
+              Configure how delivery statuses are mapped and displayed. Map incoming values from different platforms and customize colors for each status.
             </p>
-            <p className="mt-2 text-sm text-[var(--neutral-500)]">
-              Use this ID in n8n and other systems to log messages for this client
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            onClick={copyClientId}
-            className="shrink-0"
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 mr-2 text-[var(--success)]" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4 mr-2" />
-                Copy ID
-              </>
-            )}
-          </Button>
-        </div>
-      </Card>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <Card className="text-center">
-          <p className="text-sm text-[var(--neutral-600)]">Total Messages</p>
-          <p className="text-2xl font-semibold text-[var(--primary)] mt-1">
-            {client.total_messages.toLocaleString()}
-          </p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-[var(--neutral-600)]">Created</p>
-          <p className="text-lg font-medium text-[var(--neutral-900)] mt-1">
-            {new Date(client.created_at).toLocaleDateString()}
-          </p>
-        </Card>
-        <Card className="text-center">
-          <p className="text-sm text-[var(--neutral-600)]">Last Updated</p>
-          <p className="text-lg font-medium text-[var(--neutral-900)] mt-1">
-            {new Date(client.updated_at).toLocaleDateString()}
-          </p>
-        </Card>
-      </div>
-
-      {/* User Management Section */}
-      <Card className="mb-6">
-        <div className="flex items-center justify-between pb-4 border-b border-[var(--neutral-200)]">
-          <div className="flex items-center gap-3">
-            <Users className="w-5 h-5 text-[var(--primary)]" />
-            <h3 className="text-lg font-semibold text-[var(--neutral-900)]">Client Users</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={copyPortalLink}
-            >
-              {copiedLink ? (
-                <>
-                  <Check className="w-4 h-4 mr-2 text-[var(--success)]" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <LinkIcon className="w-4 h-4 mr-2" />
-                  Copy Portal Link
-                </>
-              )}
-            </Button>
-            <Button size="sm" onClick={() => setShowUserModal(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add User
-            </Button>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          {users.length === 0 ? (
-            <div className="text-center py-8">
-              <Users className="w-12 h-12 mx-auto text-[var(--neutral-400)] mb-4" />
-              <p className="text-[var(--neutral-600)]">No users added yet</p>
-              <p className="text-sm text-[var(--neutral-400)] mt-1">
-                Add users to give them access to the client portal
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {users.map((user) => (
-                <div
-                  key={user.id}
-                  className={`flex items-center justify-between p-4 rounded-lg border ${
-                    user.is_active 
-                      ? 'border-[var(--neutral-200)] bg-white' 
-                      : 'border-[var(--neutral-200)] bg-[var(--neutral-50)] opacity-60'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-[var(--neutral-900)]">
-                        {user.name || user.email}
-                      </p>
-                      {user.is_active ? (
-                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--success-light)] text-[var(--success)] flex items-center gap-1">
-                          <UserCheck className="w-3 h-3" />
-                          Active
+            
+            {/* Combined Status Mapping and Colors */}
+            <div className="space-y-4">
+              {MAIN_STATUSES.map((status) => (
+                <div key={status.key} className="p-4 rounded-lg border border-[var(--neutral-200)] bg-[var(--neutral-50)]">
+                  <div className="flex items-start gap-4">
+                    {/* Color Picker */}
+                    <div className="flex flex-col items-center gap-1">
+                      <input
+                        type="color"
+                        value={statusColors[status.key] || DEFAULT_STATUS_COLORS[status.key]}
+                        onChange={(e) => {
+                          setStatusColors({
+                            ...statusColors,
+                            [status.key]: e.target.value,
+                          });
+                        }}
+                        className="w-12 h-12 rounded cursor-pointer border-0 p-0"
+                        title={`Color for ${status.label}`}
+                      />
+                      <input
+                        type="text"
+                        value={statusColors[status.key] || DEFAULT_STATUS_COLORS[status.key]}
+                        onChange={(e) => {
+                          setStatusColors({
+                            ...statusColors,
+                            [status.key]: e.target.value,
+                          });
+                        }}
+                        className="text-xs font-mono text-[var(--neutral-600)] w-20 px-2 py-1 rounded border border-[var(--neutral-200)] text-center"
+                        placeholder="#000000"
+                      />
+                    </div>
+                    
+                    {/* Status Info and Mapping */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span
+                          className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium text-white"
+                          style={{ backgroundColor: statusColors[status.key] || DEFAULT_STATUS_COLORS[status.key] }}
+                        >
+                          {status.label}
                         </span>
+                        <span className="text-xs text-[var(--neutral-500)]">{status.description}</span>
+                      </div>
+                      
+                      {status.key === 'PENDING' ? (
+                        <p className="text-xs text-[var(--neutral-500)] italic">
+                          Pending is automatically assigned to messages with no status (NULL)
+                        </p>
                       ) : (
-                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--neutral-200)] text-[var(--neutral-600)] flex items-center gap-1">
-                          <UserX className="w-3 h-3" />
-                          Inactive
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-[var(--neutral-600)] shrink-0">Maps from:</span>
+                          <Input
+                            type="text"
+                            placeholder="e.g., read,Read,READ"
+                            value={statusMappings[status.key] || ''}
+                            onChange={(e) => {
+                              setStatusMappings({
+                                ...statusMappings,
+                                [status.key]: e.target.value,
+                              });
+                            }}
+                            className="flex-1 text-sm"
+                          />
+                        </div>
                       )}
                     </div>
-                    <p className="text-sm text-[var(--neutral-500)]">{user.email}</p>
-                    <div className="flex items-center gap-2 mt-2">
-                      {user.permissions.analytics && (
-                        <span className="text-xs px-2 py-1 rounded bg-[var(--primary-light)] text-[var(--primary)]">
-                          Analytics
-                        </span>
-                      )}
-                      {user.permissions.templates && (
-                        <span className="text-xs px-2 py-1 rounded bg-[var(--success-light)] text-[var(--success)]">
-                          Templates
-                        </span>
-                      )}
-                      {user.permissions.settings && (
-                        <span className="text-xs px-2 py-1 rounded bg-[var(--warning-light)] text-[var(--warning)]">
-                          Settings
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 ml-4">
-                    <button
-                      onClick={() => handleEditUser(user)}
-                      className="p-2 rounded-lg hover:bg-[var(--primary-light)] transition-colors"
-                      title="Edit user"
-                    >
-                      <Pencil className="w-4 h-4 text-[var(--primary)]" />
-                    </button>
-                    <button
-                      onClick={() => handleToggleUserActive(user)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        user.is_active 
-                          ? 'hover:bg-[var(--warning-light)]' 
-                          : 'hover:bg-[var(--success-light)]'
-                      }`}
-                      title={user.is_active ? 'Deactivate user' : 'Activate user'}
-                    >
-                      {user.is_active ? (
-                        <UserX className="w-4 h-4 text-[var(--warning)]" />
-                      ) : (
-                        <UserCheck className="w-4 h-4 text-[var(--success)]" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(user.id)}
-                      className="p-2 rounded-lg hover:bg-[var(--error-light)] transition-colors"
-                      title="Delete user"
-                    >
-                      <Trash2 className="w-4 h-4 text-[var(--error)]" />
-                    </button>
                   </div>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Settings Form */}
-      <Card>
-        <form onSubmit={handleSave} className="space-y-6">
-          <h3 className="text-lg font-semibold text-[var(--neutral-900)] pb-4 border-b border-[var(--neutral-200)]">
-            Client Information
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              id="name"
-              label="Company Name"
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-            <Input
-              id="industry"
-              label="Industry"
-              type="text"
-              value={formData.industry}
-              onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-              placeholder="e.g., Healthcare, Retail"
-            />
+            
+            {/* Reset to Defaults Button */}
+            <button
+              type="button"
+              onClick={() => setShowResetModal(true)}
+              className="mt-4 text-sm text-[var(--primary)] hover:text-[var(--primary-dark)] underline"
+            >
+              Reset to defaults
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              id="email"
-              label="Contact Email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="contact@example.com"
-            />
-            <Input
-              id="phone"
-              label="Contact Phone"
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              placeholder="+91 98765 43210"
-            />
-          </div>
-
-          {/* Channels */}
+          {/* HTTP Status Code Configuration */}
           <div className="pt-4 border-t border-[var(--neutral-200)]">
-            <h4 className="text-sm font-medium text-[var(--neutral-700)] mb-4">Enabled Channels</h4>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.whatsapp_enabled}
-                  onChange={(e) => setFormData({ ...formData, whatsapp_enabled: e.target.checked })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="flex items-center gap-2 text-sm text-[var(--neutral-700)]">
-                  <MessageSquare className="w-4 h-4 text-[var(--success)]" />
-                  WhatsApp
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.sms_enabled}
-                  onChange={(e) => setFormData({ ...formData, sms_enabled: e.target.checked })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="flex items-center gap-2 text-sm text-[var(--neutral-700)]">
-                  <Smartphone className="w-4 h-4 text-[var(--primary)]" />
-                  SMS
-                </span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.email_enabled}
-                  onChange={(e) => setFormData({ ...formData, email_enabled: e.target.checked })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="flex items-center gap-2 text-sm text-[var(--neutral-700)]">
-                  <Mail className="w-4 h-4 text-[var(--warning)]" />
-                  Email
-                </span>
-              </label>
+            <h4 className="text-sm font-medium text-[var(--neutral-700)] mb-2">HTTP Status Code Configuration</h4>
+            <p className="text-xs text-[var(--neutral-500)] mb-4">
+              Configure how HTTP status codes are mapped and displayed. Map status codes from different platforms and customize colors for each category.
+            </p>
+            
+            {/* Combined Status Code Mapping and Colors */}
+            <div className="space-y-4">
+              {STATUS_CODE_CATEGORIES.map((category) => (
+                <div key={category.key} className="p-4 rounded-lg border border-[var(--neutral-200)] bg-[var(--neutral-50)]">
+                  <div className="flex items-start gap-4">
+                    {/* Color Picker */}
+                    <div className="flex flex-col items-center gap-1">
+                      <input
+                        type="color"
+                        value={statusCodeColors[category.key] || DEFAULT_STATUS_CODE_COLORS[category.key]}
+                        onChange={(e) => {
+                          setStatusCodeColors({
+                            ...statusCodeColors,
+                            [category.key]: e.target.value,
+                          });
+                        }}
+                        className="w-12 h-12 rounded cursor-pointer border-0 p-0"
+                        title={`Color for ${category.label}`}
+                      />
+                      <input
+                        type="text"
+                        value={statusCodeColors[category.key] || DEFAULT_STATUS_CODE_COLORS[category.key]}
+                        onChange={(e) => {
+                          setStatusCodeColors({
+                            ...statusCodeColors,
+                            [category.key]: e.target.value,
+                          });
+                        }}
+                        className="text-xs font-mono text-[var(--neutral-600)] w-20 px-2 py-1 rounded border border-[var(--neutral-200)] text-center"
+                        placeholder="#000000"
+                      />
+                    </div>
+                    
+                    {/* Category Info and Mapping */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span
+                          className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium text-white"
+                          style={{ backgroundColor: statusCodeColors[category.key] || DEFAULT_STATUS_CODE_COLORS[category.key] }}
+                        >
+                          {category.label}
+                        </span>
+                        <span className="text-xs text-[var(--neutral-500)]">{category.description}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--neutral-600)] shrink-0">Maps from:</span>
+                        <Input
+                          type="text"
+                          placeholder="e.g., 200,201,202"
+                          value={statusCodeMappings[category.key] || ''}
+                          onChange={(e) => {
+                            setStatusCodeMappings({
+                              ...statusCodeMappings,
+                              [category.key]: e.target.value,
+                            });
+                          }}
+                          className="flex-1 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
+            
+            {/* Reset to Defaults Button */}
+            <button
+              type="button"
+              onClick={() => setShowResetModal(true)}
+              className="mt-4 text-sm text-[var(--primary)] hover:text-[var(--primary-dark)] underline"
+            >
+              Reset to defaults
+            </button>
           </div>
 
-          {/* Messages */}
-          {error && (
-            <div className="p-3 rounded-lg bg-[var(--error-light)] text-[var(--error)] text-sm">
-              {error}
-            </div>
-          )}
-          
-          {success && (
-            <div className="p-3 rounded-lg bg-[var(--success-light)] text-[var(--success)] text-sm">
-              {success}
-            </div>
-          )}
+              {/* Messages */}
+              {error && (
+                <div className="p-3 rounded-lg bg-[var(--error-light)] text-[var(--error)] text-sm">
+                  {error}
+                </div>
+              )}
+              
+              {success && (
+                <div className="p-3 rounded-lg bg-[var(--success-light)] text-[var(--success)] text-sm">
+                  {success}
+                </div>
+              )}
 
-          {/* Actions */}
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-[var(--neutral-200)]">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={fetchData}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Reset
+                </Button>
+                <Button type="submit" loading={saving}>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Changes
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+
+      {/* Reset Confirmation Modal */}
+      <Modal
+        isOpen={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        title="Reset to Defaults"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-[var(--warning)] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-[var(--neutral-700)]">
+                Are you sure you want to reset all delivery status mappings and colors to their default values?
+              </p>
+              <p className="text-xs text-[var(--neutral-500)] mt-2">
+                This will reset:
+              </p>
+              <ul className="text-xs text-[var(--neutral-500)] mt-1 ml-4 list-disc">
+                <li>All delivery status mappings</li>
+                <li>All delivery status colors</li>
+                <li>All HTTP status code mappings</li>
+                <li>All HTTP status code colors</li>
+              </ul>
+              <p className="text-xs text-[var(--warning)] mt-3 font-medium">
+                This action cannot be undone. You will need to reconfigure your settings.
+              </p>
+            </div>
+          </div>
+          
           <div className="flex justify-end gap-3 pt-4 border-t border-[var(--neutral-200)]">
             <Button
               type="button"
               variant="secondary"
-              onClick={fetchData}
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Reset
-            </Button>
-            <Button type="submit" loading={saving}>
-              <Save className="w-4 h-4 mr-2" />
-              Save Changes
-            </Button>
-          </div>
-        </form>
-      </Card>
-
-      {/* Add User Modal */}
-      <Modal
-        isOpen={showUserModal}
-        onClose={() => setShowUserModal(false)}
-        title="Add Client User"
-      >
-        <form onSubmit={handleCreateUser} className="space-y-4">
-          <Input
-            id="user-email"
-            label="Email"
-            type="email"
-            value={newUser.email}
-            onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-            placeholder="user@example.com"
-            required
-          />
-          
-          <div className="relative">
-            <Input
-              id="user-password"
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              value={newUser.password}
-              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-              placeholder="Enter password"
-              required
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-[38px] text-[var(--neutral-400)]"
-            >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-          
-          <Input
-            id="user-name"
-            label="Name (Optional)"
-            type="text"
-            value={newUser.name}
-            onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            placeholder="John Doe"
-          />
-
-          {/* Permissions */}
-          <div>
-            <label className="block text-sm font-medium text-[var(--neutral-700)] mb-3">
-              Permissions
-            </label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newUser.permissions.analytics}
-                  onChange={(e) => setNewUser({
-                    ...newUser,
-                    permissions: { ...newUser.permissions, analytics: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Template Analytics</span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newUser.permissions.templates}
-                  onChange={(e) => setNewUser({
-                    ...newUser,
-                    permissions: { ...newUser.permissions, templates: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Templates (Coming Soon)</span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newUser.permissions.settings}
-                  onChange={(e) => setNewUser({
-                    ...newUser,
-                    permissions: { ...newUser.permissions, settings: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Settings (Coming Soon)</span>
-              </label>
-            </div>
-          </div>
-
-          {userError && (
-            <div className="p-3 rounded-lg bg-[var(--error-light)] text-[var(--error)] text-sm">
-              {userError}
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setShowUserModal(false)}
+              onClick={() => setShowResetModal(false)}
             >
               Cancel
             </Button>
-            <Button type="submit" loading={creatingUser}>
-              Create User
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Edit User Modal */}
-      <Modal
-        isOpen={showEditModal}
-        onClose={() => {
-          setShowEditModal(false);
-          setEditingUser(null);
-        }}
-        title="Edit User"
-      >
-        <form onSubmit={handleUpdateUser} className="space-y-4">
-          <Input
-            id="edit-user-email"
-            label="Email"
-            type="email"
-            value={editUserData.email}
-            onChange={(e) => setEditUserData({ ...editUserData, email: e.target.value })}
-            placeholder="user@example.com"
-            required
-          />
-          
-          <div className="relative">
-            <Input
-              id="edit-user-password"
-              label="New Password (leave empty to keep current)"
-              type={showEditPassword ? 'text' : 'password'}
-              value={editUserData.password}
-              onChange={(e) => setEditUserData({ ...editUserData, password: e.target.value })}
-              placeholder="Enter new password"
-            />
-            <button
-              type="button"
-              onClick={() => setShowEditPassword(!showEditPassword)}
-              className="absolute right-3 top-[38px] text-[var(--neutral-400)]"
-            >
-              {showEditPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-          
-          <Input
-            id="edit-user-name"
-            label="Name"
-            type="text"
-            value={editUserData.name}
-            onChange={(e) => setEditUserData({ ...editUserData, name: e.target.value })}
-            placeholder="John Doe"
-          />
-
-          {/* Permissions */}
-          <div>
-            <label className="block text-sm font-medium text-[var(--neutral-700)] mb-3">
-              Permissions
-            </label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editUserData.permissions.analytics}
-                  onChange={(e) => setEditUserData({
-                    ...editUserData,
-                    permissions: { ...editUserData.permissions, analytics: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Template Analytics</span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editUserData.permissions.templates}
-                  onChange={(e) => setEditUserData({
-                    ...editUserData,
-                    permissions: { ...editUserData.permissions, templates: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Templates (Coming Soon)</span>
-              </label>
-              
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editUserData.permissions.settings}
-                  onChange={(e) => setEditUserData({
-                    ...editUserData,
-                    permissions: { ...editUserData.permissions, settings: e.target.checked }
-                  })}
-                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                />
-                <span className="text-sm text-[var(--neutral-700)]">Settings (Coming Soon)</span>
-              </label>
-            </div>
-          </div>
-
-          {editUserError && (
-            <div className="p-3 rounded-lg bg-[var(--error-light)] text-[var(--error)] text-sm">
-              {editUserError}
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
-              variant="secondary"
               onClick={() => {
-                setShowEditModal(false);
-                setEditingUser(null);
+                setStatusColors({ ...DEFAULT_STATUS_COLORS });
+                setStatusMappings({ ...DEFAULT_STATUS_MAPPINGS });
+                setStatusCodeColors({ ...DEFAULT_STATUS_CODE_COLORS });
+                setStatusCodeMappings({ ...DEFAULT_STATUS_CODE_MAPPINGS });
+                setShowResetModal(false);
               }}
+              className="bg-[var(--error)] text-white hover:bg-[var(--error-dark)] focus:ring-[var(--error)]"
             >
-              Cancel
-            </Button>
-            <Button type="submit" loading={updatingUser}>
-              Save Changes
+              Reset to Defaults
             </Button>
           </div>
-        </form>
+        </div>
       </Modal>
     </div>
   );

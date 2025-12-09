@@ -24,6 +24,9 @@ export interface Client {
   sms_enabled: boolean;
   email_enabled: boolean;
   status: string;
+  status_mappings: Record<string, string> | null; // Maps incoming status to normalized status (e.g., {"read": "READ", "Read": "READ"})
+  status_code_mappings: Record<string, string> | null; // Maps status codes to categories (e.g., {"200,201,202": "SUCCESS"})
+  status_colors: Record<string, string> | null; // Custom colors for delivery statuses (e.g., {"SENT": "#3B82F6"})
   created_at: Date;
   updated_at: Date;
   total_messages?: number;
@@ -50,18 +53,23 @@ export interface StatusDistribution {
 }
 
 export interface AnalyticsSummary {
-  total_messages: number;
+  total_contacts: number; // Total rows/API hits
+  sent: number; // Sent + Delivered + Read + Replied
   delivered: number;
   read: number;
-  failed: number;
-  delivery_rate: number;
-  read_rate: number;
+  replied: number;
+  failed: number; // Those with failed status
+  pending: number; // Those with no status
 }
 
 export interface ClientUserPermissions {
   analytics: boolean;
   templates: boolean;
+  campaigns: boolean;
+  reports: boolean;
+  integrations: boolean;
   settings: boolean;
+  client_settings: boolean; // For Client Settings tab (Client ID, Users, Info, Channels)
 }
 
 export interface ClientUser {
