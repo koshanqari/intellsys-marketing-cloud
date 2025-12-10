@@ -23,6 +23,8 @@ export async function createClientUser(data: {
     data.name || null,
     data.role || 'viewer',
     JSON.stringify(data.permissions || { 
+      journey_builder: false,
+      journey_builder_edit: false,
       analytics: true, 
       templates: false, 
       campaigns: false, 

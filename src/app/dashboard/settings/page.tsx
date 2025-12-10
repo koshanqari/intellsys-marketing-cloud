@@ -67,7 +67,7 @@ export default function SettingsPage() {
     { key: 'DELIVERED', label: 'Delivered', description: 'Message delivered to device' },
     { key: 'READ', label: 'Read', description: 'Message read by recipient' },
     { key: 'REPLIED', label: 'Action', description: 'User replied to message' },
-    { key: 'PENDING', label: 'Pending', description: 'Those with no status' },
+    { key: 'PENDING', label: 'Pending', description: 'Messages with no status (use null for NULL, $empty for empty string)' },
     { key: 'FAILED', label: 'Failed', description: 'Message failed to deliver' },
   ];
 
@@ -85,7 +85,7 @@ export default function SettingsPage() {
     READ: 'read,Read,READ',
     REPLIED: 'replied,Replied,REPLIED',
     FAILED: 'failed,Failed,FAILED',
-    PENDING: '', // Pending is for messages with no status (NULL), so no mapping needed
+    PENDING: 'null,$empty', // Pending maps to null and empty string values ($empty = empty string)
   };
 
   // Default status code mappings
@@ -115,6 +115,7 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchData();
     checkUserRole();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUserRole = async () => {
@@ -168,7 +169,31 @@ export default function SettingsPage() {
       const existingMappings = clientData.status_mappings || {};
       const initializedMappings: Record<string, string> = {};
       MAIN_STATUSES.forEach(status => {
-        initializedMappings[status.key] = existingMappings[status.key] || DEFAULT_STATUS_MAPPINGS[status.key] || '';
+        let mappingValue = existingMappings[status.key] || DEFAULT_STATUS_MAPPINGS[status.key] || '';
+        
+        // For PENDING, ensure empty string is included if 'null' is present
+        if (status.key === 'PENDING' && mappingValue) {
+          const values = mappingValue.split(',').map((v: string) => v.trim());
+          const hasNull = values.includes('null');
+          const hasEmptyString = values.includes('') || values.includes('$empty');
+          
+          if (hasNull && !hasEmptyString) {
+            // Add $empty if null is present but empty string is not
+            mappingValue = mappingValue.trim();
+            if (!mappingValue.endsWith(',')) {
+              mappingValue += ',';
+            }
+            mappingValue += '$empty';
+          } else if (hasEmptyString && !values.includes('$empty')) {
+            // Convert empty string to $empty for clarity
+            mappingValue = mappingValue.split(',').map((v: string) => {
+              const trimmed = v.trim();
+              return trimmed === '' ? '$empty' : trimmed;
+            }).join(',');
+          }
+        }
+        
+        initializedMappings[status.key] = mappingValue;
       });
       setStatusMappings(initializedMappings);
 
@@ -285,7 +310,7 @@ export default function SettingsPage() {
         <Card className="text-center py-12 max-w-md">
           <AlertCircle className="w-12 h-12 mx-auto text-[var(--error)] mb-4" />
           <h2 className="text-lg font-medium text-[var(--neutral-900)]">Access Denied</h2>
-          <p className="mt-1 text-[var(--neutral-600)]">You don't have permission to access this page.</p>
+          <p className="mt-1 text-[var(--neutral-600)]">You do not have permission to access this page.</p>
         </Card>
       </div>
     );
@@ -357,27 +382,21 @@ export default function SettingsPage() {
                         <span className="text-xs text-[var(--neutral-500)]">{status.description}</span>
                       </div>
                       
-                      {status.key === 'PENDING' ? (
-                        <p className="text-xs text-[var(--neutral-500)] italic">
-                          Pending is automatically assigned to messages with no status (NULL)
-                        </p>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[var(--neutral-600)] shrink-0">Maps from:</span>
-                          <Input
-                            type="text"
-                            placeholder="e.g., read,Read,READ"
-                            value={statusMappings[status.key] || ''}
-                            onChange={(e) => {
-                              setStatusMappings({
-                                ...statusMappings,
-                                [status.key]: e.target.value,
-                              });
-                            }}
-                            className="flex-1 text-sm"
-                          />
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--neutral-600)] shrink-0">Maps from:</span>
+                        <Input
+                          type="text"
+                          placeholder={status.key === 'PENDING' ? 'e.g., null,$empty' : 'e.g., read,Read,READ'}
+                          value={statusMappings[status.key] || ''}
+                          onChange={(e) => {
+                            setStatusMappings({
+                              ...statusMappings,
+                              [status.key]: e.target.value,
+                            });
+                          }}
+                          className="flex-1 text-sm"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getSession, getCurrentClient, getClientUserSession } from '@/lib/auth';
 import { 
-  getAnalyticsSummary, 
-  getTemplateStats, 
   getTemplateNames,
   getClientById
 } from '@/lib/queries';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   // Check for either super admin session or client user session
   const adminSession = await getSession();
   const clientUserSession = await getClientUserSession();
@@ -34,10 +32,6 @@ export async function GET(request: NextRequest) {
   if (!clientId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  const searchParams = request.nextUrl.searchParams;
-  const startDate = searchParams.get('startDate') || undefined;
-  const endDate = searchParams.get('endDate') || undefined;
 
   try {
     const [client, templateNames] = await Promise.all([

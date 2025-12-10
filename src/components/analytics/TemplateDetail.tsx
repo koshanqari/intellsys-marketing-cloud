@@ -22,8 +22,7 @@ import {
   MessageSquare,
   XCircle,
   Filter,
-  ChevronDown,
-  Check
+  ChevronDown
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import StatCard from '@/components/ui/StatCard';
@@ -80,7 +79,18 @@ function parseStatusMappings(mappings: unknown): Record<string, string> {
 
 // Normalize status using status mappings
 function normalizeStatus(rawStatus: string | null, statusMappings?: unknown): { normalized: string; mainStatus: string } {
-  if (!rawStatus) {
+  // Handle null, undefined, or empty string - check if they map to PENDING
+  if (!rawStatus || rawStatus === '') {
+    const mappings = parseStatusMappings(statusMappings);
+    const pendingMapping = mappings['PENDING'];
+    if (pendingMapping && typeof pendingMapping === 'string') {
+      const mappedValues = pendingMapping.split(',').map(v => v.trim()).filter(Boolean);
+      // Check if null or empty string is in the PENDING mapping
+      if (mappedValues.some(v => v === 'null' || v === '')) {
+        return { normalized: 'Pending', mainStatus: 'PENDING' };
+      }
+    }
+    // Default: null/empty maps to PENDING
     return { normalized: 'Pending', mainStatus: 'PENDING' };
   }
 
@@ -100,14 +110,22 @@ function normalizeStatus(rawStatus: string | null, statusMappings?: unknown): { 
     return { normalized: rawStatus, mainStatus: rawStatus.toUpperCase() };
   }
 
-  // Check each main status mapping to see if the raw status matches
-  const mainStatuses = ['SENT', 'DELIVERED', 'READ', 'REPLIED', 'FAILED'];
+  // Check each main status mapping to see if the raw status matches (including PENDING)
+  const mainStatuses = ['SENT', 'DELIVERED', 'READ', 'REPLIED', 'FAILED', 'PENDING'];
   
   for (const mainStatus of mainStatuses) {
     const mappingValue = mappings[mainStatus];
     if (mappingValue && typeof mappingValue === 'string') {
       const mappedValues = mappingValue.split(',').map(v => v.trim()).filter(Boolean);
       // Check if raw status matches any of the mapped values (case-insensitive)
+      // For empty string, check if '' is in the mapping
+      if (rawStatus === '' && mappedValues.includes('')) {
+        return { 
+          normalized: mainStatus.charAt(0) + mainStatus.slice(1).toLowerCase(), 
+          mainStatus 
+        };
+      }
+      // For other values, check case-insensitive match
       if (mappedValues.some(v => v.toLowerCase() === rawStatus.toLowerCase() || v === rawStatus)) {
         return { 
           normalized: mainStatus.charAt(0) + mainStatus.slice(1).toLowerCase(), 
@@ -140,10 +158,10 @@ const DEFAULT_STATUS_COLORS: Record<string, string> = {
 };
 
 function getStatusBadge(status: string | null, statusMappings?: unknown, statusColors?: Record<string, string>) {
-  // Show the RAW database value, not normalized
-  const displayText = status || 'Pending';
+  // Show the RAW database value - if null/undefined/empty, show "null" as string
+  const displayText = (status === null || status === undefined || status === '') ? 'null' : status;
   
-  // But use the mapped status to get the color
+  // But use the mapped status to get the color (for null, use PENDING color)
   const { mainStatus } = normalizeStatus(status, statusMappings);
   
   // Get color - direct lookup, skip CODE_ keys
@@ -186,19 +204,6 @@ function getStatusBadge(status: string | null, statusMappings?: unknown, statusC
   );
 }
 
-function isStatusCodeSuccess(statusCode: number | null, statusCodeMappings?: Record<string, string>): boolean {
-  if (!statusCode) return false;
-  
-  // If no mappings, default to 200-299 range as success
-  if (!statusCodeMappings || !statusCodeMappings.SUCCESS) {
-    return statusCode >= 200 && statusCode < 300;
-  }
-  
-  // Check if status code is in the SUCCESS mapping
-  const successCodes = statusCodeMappings.SUCCESS.split(',').map(code => parseInt(code.trim()));
-  return successCodes.includes(statusCode);
-}
-
 // Get status code category (SUCCESS, CLIENT_ERROR, SERVER_ERROR)
 function getStatusCodeCategory(
   statusCode: number | null,
@@ -239,10 +244,10 @@ function getStatusCodeBadge(
   statusCodeMappings?: Record<string, string>,
   statusColors?: Record<string, string>
 ) {
-  if (!statusCode) {
+  if (statusCode === null) {
     return (
       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--neutral-100)] text-[var(--neutral-700)]">
-        N/A
+        null
       </span>
     );
   }
@@ -348,7 +353,7 @@ export default function TemplateDetail({
   const defaultDates = getDefaultDateRange();
   const [startDate, setStartDate] = useState(defaultDates.start);
   const [endDate, setEndDate] = useState(defaultDates.end);
-  const [selectedStatusCodes, setSelectedStatusCodes] = useState<Set<number>>(new Set());
+  const [selectedStatusCodes, setSelectedStatusCodes] = useState<Set<number | string>>(new Set());
   const [selectedStatusMessages, setSelectedStatusMessages] = useState<Set<string>>(new Set());
   const [selectedDeliveryStatuses, setSelectedDeliveryStatuses] = useState<Set<string>>(new Set());
   
@@ -398,6 +403,7 @@ export default function TemplateDetail({
     if (templateName) {
       fetchTemplateData();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateName, startDate, endDate]);
 
   // Close dropdowns when clicking outside
@@ -425,20 +431,48 @@ export default function TemplateDetail({
       };
     }
     
-    const statusCodes = new Set<number>();
+    const statusCodes = new Set<number | string>();
     const statusMessages = new Set<string>();
     const deliveryStatuses = new Set<string>();
     
     data.messages.forEach(msg => {
-      if (msg.status_code !== null) statusCodes.add(msg.status_code);
-      if (msg.status_message) statusMessages.add(msg.status_message);
-      if (msg.message_status) deliveryStatuses.add(msg.message_status);
+      // Include null/undefined/empty values - use 'null' as string representation for blanks
+      if (msg.status_code !== null && msg.status_code !== undefined) {
+        statusCodes.add(msg.status_code);
+      } else {
+        statusCodes.add('null');
+      }
+      // Handle status_message - check for null, undefined, or empty string
+      if (msg.status_message !== null && msg.status_message !== undefined && msg.status_message !== '') {
+        statusMessages.add(msg.status_message);
+      } else {
+        statusMessages.add('null');
+      }
+      // Handle message_status - check for null, undefined, or empty string
+      if (msg.message_status !== null && msg.message_status !== undefined && msg.message_status !== '') {
+        deliveryStatuses.add(msg.message_status);
+      } else {
+        deliveryStatuses.add('null');
+      }
     });
     
     return {
-      statusCodes: Array.from(statusCodes).sort((a, b) => a - b),
-      statusMessages: Array.from(statusMessages).sort(),
-      deliveryStatuses: Array.from(deliveryStatuses).sort(),
+      statusCodes: Array.from(statusCodes).sort((a, b) => {
+        if (a === 'null') return 1;
+        if (b === 'null') return -1;
+        if (typeof a === 'number' && typeof b === 'number') return a - b;
+        return String(a).localeCompare(String(b));
+      }),
+      statusMessages: Array.from(statusMessages).sort((a, b) => {
+        if (a === 'null') return 1;
+        if (b === 'null') return -1;
+        return a.localeCompare(b);
+      }),
+      deliveryStatuses: Array.from(deliveryStatuses).sort((a, b) => {
+        if (a === 'null') return 1;
+        if (b === 'null') return -1;
+        return a.localeCompare(b);
+      }),
     };
   }, [data]);
 
@@ -455,46 +489,54 @@ export default function TemplateDetail({
         (msg.name?.toLowerCase().includes(query)) ||
         (msg.phone?.includes(query)) ||
         (msg.message_status?.toLowerCase().includes(query)) ||
-        (msg.status_message?.toLowerCase().includes(query))
+        (msg.status_message?.toLowerCase().includes(query)) ||
+        (query === 'null' && (
+          msg.message_status === null || msg.message_status === undefined || msg.message_status === '' ||
+          msg.status_message === null || msg.status_message === undefined || msg.status_message === '' ||
+          msg.status_code === null || msg.status_code === undefined
+        ))
       );
     }
     
     // Status code filter
     if (selectedStatusCodes.size > 0) {
-      filtered = filtered.filter(msg => 
-        msg.status_code !== null && selectedStatusCodes.has(msg.status_code)
-      );
+      filtered = filtered.filter(msg => {
+        // Check if this message matches any selected code
+        const isNull = (msg.status_code === null || msg.status_code === undefined);
+        const matchesNull = selectedStatusCodes.has('null') && isNull;
+        const matchesCode = !isNull && msg.status_code !== null && selectedStatusCodes.has(msg.status_code);
+        return matchesNull || matchesCode;
+      });
     }
     
     // Status message filter
     if (selectedStatusMessages.size > 0) {
-      filtered = filtered.filter(msg => 
-        msg.status_message && selectedStatusMessages.has(msg.status_message)
-      );
+      filtered = filtered.filter(msg => {
+        // Check if this message matches any selected message
+        const isBlank = (msg.status_message === null || msg.status_message === undefined || msg.status_message === '');
+        const matchesNull = selectedStatusMessages.has('null') && isBlank;
+        const matchesMessage = !isBlank && msg.status_message !== null && msg.status_message !== undefined && selectedStatusMessages.has(msg.status_message);
+        return matchesNull || matchesMessage;
+      });
     }
     
     // Delivery status filter
     if (selectedDeliveryStatuses.size > 0) {
-      filtered = filtered.filter(msg => 
-        msg.message_status && selectedDeliveryStatuses.has(msg.message_status)
-      );
+      filtered = filtered.filter(msg => {
+        // Check if this message matches any selected status
+        const isBlank = (msg.message_status === null || msg.message_status === undefined || msg.message_status === '');
+        const matchesNull = selectedDeliveryStatuses.has('null') && isBlank;
+        const matchesStatus = !isBlank && msg.message_status !== null && msg.message_status !== undefined && selectedDeliveryStatuses.has(msg.message_status);
+        return matchesNull || matchesStatus;
+      });
     }
     
-    // Date range filter
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(msg => new Date(msg.created_at) >= start);
-    }
-    
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      filtered = filtered.filter(msg => new Date(msg.created_at) <= end);
-    }
+    // Note: Date range filtering is handled server-side in the API
+    // The messages returned from the API are already filtered by the date range
+    // No need for client-side date filtering here
     
     return filtered;
-  }, [data, searchQuery, startDate, endDate, selectedStatusCodes, selectedStatusMessages, selectedDeliveryStatuses]);
+  }, [data, searchQuery, selectedStatusCodes, selectedStatusMessages, selectedDeliveryStatuses]);
 
   // Pagination
   const totalPages = Math.ceil(filteredMessages.length / ITEMS_PER_PAGE);
@@ -1118,11 +1160,11 @@ export default function TemplateDetail({
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2 text-sm font-medium text-[var(--neutral-900)]">
                         <User className="w-4 h-4 text-[var(--neutral-400)]" />
-                        {message.name || 'Unknown'}
+                        {message.name === null ? 'null' : message.name || 'null'}
                       </div>
                       <div className="flex items-center gap-2 text-sm text-[var(--neutral-600)] mt-1">
                         <Phone className="w-4 h-4 text-[var(--neutral-400)]" />
-                        {message.phone || 'N/A'}
+                        {message.phone === null ? 'null' : message.phone || 'null'}
                       </div>
                     </div>
                   </td>
@@ -1130,13 +1172,13 @@ export default function TemplateDetail({
                     {getStatusCodeBadge(message.status_code, statusCodeMappings, statusColors)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-[var(--neutral-700)]">
-                    {message.status_message || 'N/A'}
+                    {(message.status_message === null || message.status_message === undefined || message.status_message === '') ? 'null' : message.status_message}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getStatusBadge(message.message_status, statusMappings, statusColors)}
                   </td>
                   <td className="px-6 py-4 text-sm text-[var(--neutral-600)] max-w-xs truncate">
-                    {message.message_status_detailed || '-'}
+                    {(message.message_status_detailed === null || message.message_status_detailed === undefined || message.message_status_detailed === '') ? 'null' : message.message_status_detailed}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-[var(--neutral-600)]">
                     {formatDate(message.created_at)}

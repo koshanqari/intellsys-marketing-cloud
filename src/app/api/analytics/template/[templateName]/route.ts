@@ -115,6 +115,14 @@ export async function GET(
     const getStatusValues = (mainStatus: string): string[] => {
       const mappingValue = statusMappings[mainStatus];
       if (mappingValue && typeof mappingValue === 'string' && mappingValue.trim()) {
+        // For PENDING, we need to preserve empty strings and convert $empty to empty string
+        if (mainStatus === 'PENDING') {
+          return mappingValue.split(',').map(v => {
+            const trimmed = v.trim();
+            // Convert $empty to actual empty string
+            return trimmed === '$empty' ? '' : trimmed;
+          });
+        }
         return mappingValue.split(',').map(v => v.trim()).filter(Boolean);
       }
       // Default fallback for backwards compatibility
@@ -123,7 +131,8 @@ export async function GET(
         DELIVERED: ['delivered', 'Delivered', 'DELIVERED'],
         READ: ['read', 'Read', 'READ'],
         REPLIED: ['replied', 'Replied', 'REPLIED'],
-        FAILED: ['failed', 'Failed', 'FAILED']
+        FAILED: ['failed', 'Failed', 'FAILED'],
+        PENDING: ['null', ''] // Default: null and empty string
       };
       return defaults[mainStatus] || [];
     };
@@ -152,6 +161,7 @@ export async function GET(
     const readValues = getStatusValues('READ');
     const repliedValues = getStatusValues('REPLIED');
     const failedValues = getStatusValues('FAILED');
+    const pendingValues = getStatusValues('PENDING');
     
     // Build parameterized conditions
     const buildStatusCondition = (values: string[], offset: number): { condition: string; params: string[] } => {
@@ -182,6 +192,57 @@ export async function GET(
       };
     };
     
+    // Build PENDING condition - special handling for null and empty string
+    const buildPendingCondition = (values: string[], offset: number): { condition: string; params: string[] } => {
+      const conditions: string[] = [];
+      const params: string[] = [];
+      let currentParamIndex = offset;
+      
+      // Check for 'null' in mapping - this means actual NULL in database
+      const hasNull = values.includes('null');
+      if (hasNull) {
+        conditions.push('message_status IS NULL');
+      }
+      
+      // Check for empty string in mapping
+      const hasEmptyString = values.includes('');
+      if (hasEmptyString) {
+        conditions.push(`message_status = ''`);
+      }
+      
+      // Get other values (excluding 'null' and '')
+      const otherValues = values.filter(v => v !== 'null' && v !== '');
+      
+      // Add exact match conditions for other values
+      if (otherValues.length > 0) {
+        const exactPlaceholders = otherValues.map((_, i) => {
+          const placeholder = `$${currentParamIndex + i + 1}`;
+          return placeholder;
+        });
+        conditions.push(`message_status IN (${exactPlaceholders.join(', ')})`);
+        params.push(...otherValues);
+        currentParamIndex += otherValues.length;
+      }
+      
+      // Add case-insensitive conditions for other values
+      if (otherValues.length > 0) {
+        const lowerPlaceholders = otherValues.map((_, i) => {
+          return `$${currentParamIndex + i + 1}`;
+        });
+        conditions.push(`LOWER(message_status) IN (${lowerPlaceholders.join(', ')})`);
+        params.push(...otherValues.map(v => v.toLowerCase()));
+      }
+      
+      if (conditions.length === 0) {
+        return { condition: 'FALSE', params: [] };
+      }
+      
+      return {
+        condition: `(${conditions.join(' OR ')})`,
+        params
+      };
+    };
+    
     let currentOffset = paramOffset;
     const sentCond = buildStatusCondition(sentValues, currentOffset);
     currentOffset += sentCond.params.length;
@@ -196,6 +257,9 @@ export async function GET(
     currentOffset += repliedCond.params.length;
     
     const failedCond = buildStatusCondition(failedValues, currentOffset);
+    currentOffset += failedCond.params.length;
+    
+    const pendingCond = buildPendingCondition(pendingValues, currentOffset);
     
     // Get summary stats for this template
     const queryParams: (string | number)[] = [
@@ -206,7 +270,8 @@ export async function GET(
       ...deliveredCond.params,
       ...readCond.params,
       ...repliedCond.params,
-      ...failedCond.params
+      ...failedCond.params,
+      ...pendingCond.params
     ];
     
     // Build date filter for WHERE clause
@@ -260,7 +325,7 @@ export async function GET(
           THEN 1 
         END)::int as failed,
         COUNT(CASE 
-          WHEN message_status IS NULL
+          WHEN ${pendingCond.condition}
           THEN 1 
         END)::int as pending
       FROM app.message_logs

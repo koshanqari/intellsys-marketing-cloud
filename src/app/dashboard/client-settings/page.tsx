@@ -78,6 +78,8 @@ export default function ClientSettingsPage() {
     password: '',
     name: '',
     permissions: {
+      journey_builder: false,
+      journey_builder_edit: false,
       analytics: true,
       templates: false,
       campaigns: false,
@@ -96,6 +98,8 @@ export default function ClientSettingsPage() {
     password: '',
     name: '',
     permissions: {
+      journey_builder: false,
+      journey_builder_edit: false,
       analytics: true,
       templates: false,
       campaigns: false,
@@ -123,6 +127,7 @@ export default function ClientSettingsPage() {
   useEffect(() => {
     fetchData();
     checkUserRole();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUserRole = async () => {
@@ -285,6 +290,8 @@ export default function ClientSettingsPage() {
         password: '',
         name: '',
         permissions: { 
+          journey_builder: false,
+          journey_builder_edit: false,
           analytics: true, 
           templates: false, 
           campaigns: false, 
@@ -520,13 +527,18 @@ export default function ClientSettingsPage() {
                         </div>
                         <p className="text-sm text-[var(--neutral-500)]">{user.email}</p>
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          {user.permissions.journey_builder && (
+                            <span className="text-xs px-2 py-1 rounded bg-[var(--success-light)] text-[var(--success)]">
+                              Journey Builder {user.permissions.journey_builder_edit ? '(Edit)' : '(View)'}
+                            </span>
+                          )}
                           {user.permissions.analytics && (
                             <span className="text-xs px-2 py-1 rounded bg-[var(--primary-light)] text-[var(--primary)]">
                               Analytics
                             </span>
                           )}
                           {user.permissions.templates && (
-                            <span className="text-xs px-2 py-1 rounded bg-[var(--success-light)] text-[var(--success)]">
+                            <span className="text-xs px-2 py-1 rounded bg-[var(--primary-light)] text-[var(--primary)]">
                               Templates
                             </span>
                           )}
@@ -770,6 +782,37 @@ export default function ClientSettingsPage() {
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  checked={newUser.permissions.journey_builder}
+                  onChange={(e) => setNewUser({
+                    ...newUser,
+                    permissions: { 
+                      ...newUser.permissions, 
+                      journey_builder: e.target.checked,
+                      journey_builder_edit: e.target.checked ? newUser.permissions.journey_builder_edit : false
+                    }
+                  })}
+                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                />
+                <span className="text-sm text-[var(--neutral-700)]">Journey Builder</span>
+              </label>
+              {newUser.permissions.journey_builder && (
+                <label className="flex items-center gap-3 cursor-pointer ml-8">
+                  <input
+                    type="checkbox"
+                    checked={newUser.permissions.journey_builder_edit}
+                    onChange={(e) => setNewUser({
+                      ...newUser,
+                      permissions: { ...newUser.permissions, journey_builder_edit: e.target.checked }
+                    })}
+                    className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                  />
+                  <span className="text-sm text-[var(--neutral-700)]">Can Edit</span>
+                </label>
+              )}
+              
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
                   checked={newUser.permissions.analytics}
                   onChange={(e) => setNewUser({
                     ...newUser,
@@ -934,6 +977,37 @@ export default function ClientSettingsPage() {
               Permissions
             </label>
             <div className="space-y-2">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editUserData.permissions.journey_builder}
+                  onChange={(e) => setEditUserData({
+                    ...editUserData,
+                    permissions: { 
+                      ...editUserData.permissions, 
+                      journey_builder: e.target.checked,
+                      journey_builder_edit: e.target.checked ? editUserData.permissions.journey_builder_edit : false
+                    }
+                  })}
+                  className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                />
+                <span className="text-sm text-[var(--neutral-700)]">Journey Builder</span>
+              </label>
+              {editUserData.permissions.journey_builder && (
+                <label className="flex items-center gap-3 cursor-pointer ml-8">
+                  <input
+                    type="checkbox"
+                    checked={editUserData.permissions.journey_builder_edit}
+                    onChange={(e) => setEditUserData({
+                      ...editUserData,
+                      permissions: { ...editUserData.permissions, journey_builder_edit: e.target.checked }
+                    })}
+                    className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                  />
+                  <span className="text-sm text-[var(--neutral-700)]">Can Edit</span>
+                </label>
+              )}
+              
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"

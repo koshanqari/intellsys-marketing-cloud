@@ -74,7 +74,7 @@ export async function createClient(data: {
     READ: 'read,Read,READ',
     REPLIED: 'replied,Replied,REPLIED',
     FAILED: 'failed,Failed,FAILED',
-    PENDING: '', // Pending is for messages with no status (NULL), so no mapping needed
+    PENDING: 'null,$empty', // Pending maps to null and empty string values ($empty = empty string)
   };
 
   // Default status code mappings

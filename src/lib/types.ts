@@ -63,6 +63,8 @@ export interface AnalyticsSummary {
 }
 
 export interface ClientUserPermissions {
+  journey_builder: boolean;
+  journey_builder_edit: boolean; // If journey_builder is true, this controls edit vs view-only
   analytics: boolean;
   templates: boolean;
   campaigns: boolean;
@@ -81,6 +83,48 @@ export interface ClientUser {
   permissions: ClientUserPermissions;
   is_active: boolean;
   last_login: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Journey Builder Types
+export interface JourneyNodePosition {
+  x: number;
+  y: number;
+}
+
+export interface JourneyTextNode {
+  id: string;
+  type: 'text';
+  position: JourneyNodePosition;
+  data: {
+    content: string;
+  };
+  outputs: string[];
+}
+
+export interface JourneyConnection {
+  id: string;
+  sourceId: string;
+  targetId: string;
+}
+
+export interface JourneyCanvasState {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+export interface Journey {
+  id: string;
+  client_id: string;
+  name: string;
+  description: string | null;
+  nodes: JourneyTextNode[];
+  connections: JourneyConnection[];
+  canvas_state: JourneyCanvasState | null;
+  status: 'draft' | 'active' | 'archived';
+  created_by: string | null;
   created_at: Date;
   updated_at: Date;
 }

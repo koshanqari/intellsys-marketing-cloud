@@ -13,8 +13,8 @@ import {
   Megaphone,
   TrendingUp,
   Plug,
-  Users,
-  User
+  User,
+  GitBranch
 } from 'lucide-react';
 import type { ClientUserPermissions } from '@/lib/types';
 
@@ -33,6 +33,13 @@ export default function Sidebar({ clientId, clientName, isSuperAdmin, permission
 
   // Main navigation items
   const mainNavItems = [
+    { 
+      href: '/dashboard/journey-builder', 
+      label: 'Journey Builder', 
+      icon: GitBranch,
+      permission: 'journey_builder' as keyof ClientUserPermissions | null,
+      disabled: false
+    },
     { 
       href: '/dashboard/analytics', 
       label: 'Template Analytics', 
