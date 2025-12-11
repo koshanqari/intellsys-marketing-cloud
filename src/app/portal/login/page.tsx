@@ -3,14 +3,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Lock, User } from 'lucide-react';
+import { Lock, Mail } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 
-export default function LoginPage() {
+export default function PortalLoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,10 +21,10 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('/api/auth/client-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await response.json();
@@ -34,12 +34,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Redirect based on user type - use window.location for full page reload to ensure cookies are set
-      if (data.userType === 'client') {
-        window.location.href = '/dashboard/analytics';
-      } else {
-        window.location.href = '/clients';
-      }
+      // Redirect to dashboard analytics page
+      router.push('/dashboard/analytics');
     } catch {
       setError('An error occurred. Please try again.');
     } finally {
@@ -66,10 +62,10 @@ export default function LoginPage() {
             className="mx-auto mb-6 object-contain"
           />
           <h1 className="text-2xl font-semibold text-[var(--neutral-900)]">
-            Intellsys Marketing Cloud
+            Client Portal
           </h1>
           <p className="mt-2 text-[var(--neutral-600)]">
-            Sign in to access the dashboard
+            Sign in to access your dashboard
           </p>
         </div>
 
@@ -78,15 +74,15 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="relative">
               <div className="absolute left-3 top-[38px] text-[var(--neutral-400)]">
-                <User className="w-5 h-5" />
+                <Mail className="w-5 h-5" />
               </div>
               <Input
-                id="username"
-                label="Username or Email"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username or email"
+                id="email"
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
                 className="pl-10"
                 required
               />
@@ -132,4 +128,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

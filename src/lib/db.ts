@@ -6,7 +6,8 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  ssl: false,
+  // Use SSL in production (Vercel requires SSL for external databases)
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
 export async function query<T>(text: string, params?: unknown[]): Promise<T[]> {

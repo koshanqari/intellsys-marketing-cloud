@@ -25,7 +25,8 @@ import {
   MinusCircle,
   WrapText,
   ExternalLink,
-  Focus
+  Focus,
+  AlertCircle
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -347,6 +348,12 @@ export default function JourneyBuilderPage() {
 
   // Permissions state
   const [canEdit, setCanEdit] = useState(true); // Default to true for super admin
+  const [showEditRestrictionModal, setShowEditRestrictionModal] = useState(false);
+
+  // Helper function to show edit restriction prompt
+  const showEditRestrictionPrompt = () => {
+    setShowEditRestrictionModal(true);
+  };
 
   // Fetch permissions
   useEffect(() => {
@@ -521,6 +528,10 @@ export default function JourneyBuilderPage() {
 
   // Add nodes
   const addNode = (type: NodeType) => {
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     const basePosition = { 
       x: 100 - pan.x / zoom + Math.random() * 100, 
       y: 100 - pan.y / zoom + Math.random() * 100 
@@ -590,7 +601,10 @@ export default function JourneyBuilderPage() {
 
   // Update node data
   const updateNodeData = (nodeId: string, updates: Record<string, unknown>) => {
-    if (!canEdit) return; // Prevent updates in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => 
       node.id === nodeId 
         ? { ...node, data: { ...node.data, ...updates } } as JourneyNode
@@ -601,7 +615,10 @@ export default function JourneyBuilderPage() {
 
   // Table manipulation functions
   const addTableColumn = (nodeId: string) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId || node.type !== 'table') return node;
       const tableNode = node as TableNode;
@@ -626,7 +643,10 @@ export default function JourneyBuilderPage() {
   };
 
   const addTableRow = (nodeId: string) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId || node.type !== 'table') return node;
       const tableNode = node as TableNode;
@@ -637,7 +657,10 @@ export default function JourneyBuilderPage() {
   };
 
   const removeTableRow = (nodeId: string, rowIndex: number) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId || node.type !== 'table') return node;
       const tableNode = node as TableNode;
@@ -649,7 +672,10 @@ export default function JourneyBuilderPage() {
   };
 
   const updateTableHeader = (nodeId: string, colIndex: number, value: string) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId || node.type !== 'table') return node;
       const tableNode = node as TableNode;
@@ -661,7 +687,10 @@ export default function JourneyBuilderPage() {
   };
 
   const updateTableCell = (nodeId: string, rowIndex: number, colIndex: number, value: string) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(prev => prev.map(node => {
       if (node.id !== nodeId || node.type !== 'table') return node;
       const tableNode = node as TableNode;
@@ -675,7 +704,12 @@ export default function JourneyBuilderPage() {
 
   // Column resize handlers
   const handleColumnResizeStart = (e: React.MouseEvent, nodeId: string, colIndex: number) => {
-    if (!canEdit) return; // Prevent in view-only mode
+    if (!canEdit) {
+      e.preventDefault();
+      e.stopPropagation();
+      showEditRestrictionPrompt();
+      return;
+    }
     e.stopPropagation();
     e.preventDefault();
     const node = nodes.find(n => n.id === nodeId);
@@ -704,6 +738,10 @@ export default function JourneyBuilderPage() {
 
   // Delete a node
   const deleteNode = (nodeId: string) => {
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     setNodes(nodes.filter(node => node.id !== nodeId));
     setConnections(connections.filter(
       conn => conn.sourceId !== nodeId && conn.targetId !== nodeId
@@ -716,6 +754,10 @@ export default function JourneyBuilderPage() {
 
   // Duplicate a node
   const duplicateNode = (nodeId: string) => {
+    if (!canEdit) {
+      showEditRestrictionPrompt();
+      return;
+    }
     const nodeToDuplicate = nodes.find(n => n.id === nodeId);
     if (!nodeToDuplicate) return;
 
@@ -738,7 +780,12 @@ export default function JourneyBuilderPage() {
 
   // Handle node drag start
   const handleNodeDragStart = (e: React.MouseEvent, nodeId: string) => {
-    if (!canEdit) return; // Prevent dragging in view-only mode
+    if (!canEdit) {
+      e.preventDefault();
+      e.stopPropagation();
+      showEditRestrictionPrompt();
+      return;
+    }
     if ((e.target as HTMLElement).closest('.node-handle') || 
         (e.target as HTMLElement).closest('.node-output') ||
         (e.target as HTMLElement).closest('.node-input')) {
@@ -859,7 +906,12 @@ export default function JourneyBuilderPage() {
 
   // Handle connection start
   const handleConnectionStart = (e: React.MouseEvent, nodeId: string, nodeType: NodeType) => {
-    if (!canEdit) return; // Prevent connections in view-only mode
+    if (!canEdit) {
+      e.preventDefault();
+      e.stopPropagation();
+      showEditRestrictionPrompt();
+      return;
+    }
     if (nodeType === 'sticky') return; // Sticky notes can't connect
     e.stopPropagation();
     const node = nodes.find(n => n.id === nodeId);
@@ -877,7 +929,12 @@ export default function JourneyBuilderPage() {
 
   // Handle connection end
   const handleConnectionEnd = (e: React.MouseEvent, targetId: string, targetType: NodeType) => {
-    if (!canEdit) return; // Prevent connections in view-only mode
+    if (!canEdit) {
+      e.preventDefault();
+      e.stopPropagation();
+      showEditRestrictionPrompt();
+      return;
+    }
     if (targetType === 'sticky') return; // Sticky notes can't receive connections
     e.stopPropagation();
     if (connecting && connecting.sourceId !== targetId) {
@@ -904,7 +961,12 @@ export default function JourneyBuilderPage() {
 
   // Handle resize start
   const handleResizeStart = (e: React.MouseEvent, nodeId: string, direction: 'se' | 'e' | 's') => {
-    if (!canEdit) return; // Prevent resizing in view-only mode
+    if (!canEdit) {
+      e.preventDefault();
+      e.stopPropagation();
+      showEditRestrictionPrompt();
+      return;
+    }
     e.stopPropagation();
     e.preventDefault();
     const node = nodes.find(n => n.id === nodeId);
@@ -1543,7 +1605,12 @@ export default function JourneyBuilderPage() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    e.preventDefault();
                     window.open(`/dashboard/analytics/${encodeURIComponent(waNode.data.templateName || '')}`, '_blank');
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
                   }}
                   className="px-2 py-1.5 text-xs font-medium rounded bg-[var(--primary-light)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors flex items-center gap-1"
                   title="View Template Analytics (opens in new tab)"
@@ -2221,15 +2288,29 @@ export default function JourneyBuilderPage() {
         )}
       </div>
 
-      {/* Instructions */}
-      <div className="p-3 border-t border-[var(--neutral-200)] bg-white">
-        <div className="flex items-center justify-center gap-6 text-xs text-[var(--neutral-500)]">
-          <span>• Drag nodes to reposition</span>
-          <span>• Drag from colored circle to connect</span>
-          <span>• Click connection to delete</span>
-          <span>• Click Save button to save changes</span>
+      {/* Edit Restriction Modal */}
+      <Modal
+        isOpen={showEditRestrictionModal}
+        onClose={() => setShowEditRestrictionModal(false)}
+        title=""
+      >
+        <div className="text-center py-6">
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 rounded-full bg-[var(--warning-light)] flex items-center justify-center">
+              <AlertCircle className="w-8 h-8 text-[var(--warning)]" />
+            </div>
+          </div>
+          <h3 className="text-lg font-semibold text-[var(--neutral-900)] mb-2">
+            Journey is Live
+          </h3>
+          <p className="text-[var(--neutral-600)] mb-6">
+            Please contact admin to edit this journey.
+          </p>
+          <Button onClick={() => setShowEditRestrictionModal(false)}>
+            Understood
+          </Button>
         </div>
-      </div>
+      </Modal>
     </div>
   );
 }

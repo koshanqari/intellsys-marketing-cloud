@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft,
@@ -12,22 +12,23 @@ import {
   RefreshCw,
   User,
   Phone,
+  MessageSquare,
+  Mail,
+  BarChart3,
+  TrendingUp,
+  Activity,
+  Circle,
   Search,
-  Download,
-  Calendar,
+  Filter,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Calendar,
   X,
-  Users,
-  MessageSquare,
-  XCircle,
-  Filter,
-  ChevronDown
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
-import StatCard from '@/components/ui/StatCard';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
+import type { MetricConfig, DynamicMetricStat } from '@/lib/types';
 
 interface TemplateMessage {
   id: string;
@@ -41,259 +42,57 @@ interface TemplateMessage {
   updated_at: string;
 }
 
-interface TemplateSummary {
-  total_contacts: number;
-  sent: number;
-  delivered: number;
-  read: number;
-  replied: number;
-  http_success: number;
-  failed: number;
-  pending: number;
-}
-
 interface TemplateData {
   templateName: string;
-  summary: TemplateSummary;
+  total: number;
+  metrics: MetricConfig[];
+  metricStats: DynamicMetricStat[];
   messages: TemplateMessage[];
-  statusCodeMappings?: Record<string, string>;
-  statusMappings?: Record<string, string>;
-  statusColors?: Record<string, string>;
 }
 
-// Parse status mappings if it's a string
-function parseStatusMappings(mappings: unknown): Record<string, string> {
-  if (!mappings) return {};
-  if (typeof mappings === 'string') {
-    try {
-      return JSON.parse(mappings);
-    } catch {
-      return {};
-    }
-  }
-  if (typeof mappings === 'object') {
-    return mappings as Record<string, string>;
-  }
-  return {};
-}
-
-// Normalize status using status mappings
-function normalizeStatus(rawStatus: string | null, statusMappings?: unknown): { normalized: string; mainStatus: string } {
-  // Handle null, undefined, or empty string - check if they map to PENDING
-  if (!rawStatus || rawStatus === '') {
-    const mappings = parseStatusMappings(statusMappings);
-    const pendingMapping = mappings['PENDING'];
-    if (pendingMapping && typeof pendingMapping === 'string') {
-      const mappedValues = pendingMapping.split(',').map(v => v.trim()).filter(Boolean);
-      // Check if null or empty string is in the PENDING mapping
-      if (mappedValues.some(v => v === 'null' || v === '')) {
-        return { normalized: 'Pending', mainStatus: 'PENDING' };
-      }
-    }
-    // Default: null/empty maps to PENDING
-    return { normalized: 'Pending', mainStatus: 'PENDING' };
-  }
-
-  // Parse mappings if needed
-  const mappings = parseStatusMappings(statusMappings);
-
-  // If no mappings, return as-is
-  if (Object.keys(mappings).length === 0) {
-    // Default fallback - check common values
-    const lowerStatus = rawStatus.toLowerCase();
-    if (['sent', 'delivered', 'read', 'replied', 'failed'].includes(lowerStatus)) {
-      return { 
-        normalized: lowerStatus.charAt(0).toUpperCase() + lowerStatus.slice(1), 
-        mainStatus: lowerStatus.toUpperCase() 
-      };
-    }
-    return { normalized: rawStatus, mainStatus: rawStatus.toUpperCase() };
-  }
-
-  // Check each main status mapping to see if the raw status matches (including PENDING)
-  const mainStatuses = ['SENT', 'DELIVERED', 'READ', 'REPLIED', 'FAILED', 'PENDING'];
-  
-  for (const mainStatus of mainStatuses) {
-    const mappingValue = mappings[mainStatus];
-    if (mappingValue && typeof mappingValue === 'string') {
-      const mappedValues = mappingValue.split(',').map(v => v.trim()).filter(Boolean);
-      // Check if raw status matches any of the mapped values (case-insensitive)
-      // For empty string, check if '' is in the mapping
-      if (rawStatus === '' && mappedValues.includes('')) {
-        return { 
-          normalized: mainStatus.charAt(0) + mainStatus.slice(1).toLowerCase(), 
-          mainStatus 
-        };
-      }
-      // For other values, check case-insensitive match
-      if (mappedValues.some(v => v.toLowerCase() === rawStatus.toLowerCase() || v === rawStatus)) {
-        return { 
-          normalized: mainStatus.charAt(0) + mainStatus.slice(1).toLowerCase(), 
-          mainStatus 
-        };
-      }
-    }
-  }
-
-  // Default fallback - check common values
-  const lowerStatus = rawStatus.toLowerCase();
-  if (['sent', 'delivered', 'read', 'replied', 'failed'].includes(lowerStatus)) {
-    return { 
-      normalized: lowerStatus.charAt(0).toUpperCase() + lowerStatus.slice(1), 
-      mainStatus: lowerStatus.toUpperCase() 
-    };
-  }
-
-  return { normalized: rawStatus, mainStatus: rawStatus.toUpperCase() };
-}
-
-// Default status colors (fallback)
-const DEFAULT_STATUS_COLORS: Record<string, string> = {
-  SENT: '#3B82F6',      // Blue
-  DELIVERED: '#10B981', // Green
-  READ: '#6366F1',      // Indigo
-  REPLIED: '#8B5CF6',   // Purple
-  PENDING: '#F59E0B',   // Amber
-  FAILED: '#EF4444',    // Red
+// Icon mapping for dynamic metrics
+const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
+  Send,
+  CheckCircle2,
+  Eye,
+  AlertCircle,
+  Clock,
+  MessageSquare,
+  Mail,
+  RefreshCw,
+  BarChart3,
+  TrendingUp,
+  Activity,
+  Circle,
+  Phone,
+  User,
 };
 
-function getStatusBadge(status: string | null, statusMappings?: unknown, statusColors?: Record<string, string>) {
-  // Show the RAW database value - if null/undefined/empty, show "null" as string
-  const displayText = (status === null || status === undefined || status === '') ? 'null' : status;
-  
-  // But use the mapped status to get the color (for null, use PENDING color)
-  const { mainStatus } = normalizeStatus(status, statusMappings);
-  
-  // Get color - direct lookup, skip CODE_ keys
-  let color = DEFAULT_STATUS_COLORS[mainStatus] || '#6B7280';
-  
-  if (statusColors && mainStatus && !mainStatus.startsWith('CODE_')) {
-    const foundColor = statusColors[mainStatus];
-    if (foundColor) {
-      color = String(foundColor);
-    }
-  }
-  
-  // Ensure # prefix
-  if (!color.startsWith('#')) {
-    color = '#' + color;
-  }
-  
-  // Light background
-  const hex = color.replace('#', '');
-  const r = parseInt(hex.substr(0, 2), 16);
-  const g = parseInt(hex.substr(2, 2), 16);
-  const b = parseInt(hex.substr(4, 2), 16);
-  const bgColor = `rgba(${r}, ${g}, ${b}, 0.1)`;
-
-  return (
-    <span 
-      style={{ 
-        backgroundColor: bgColor, 
-        color: color,
-        padding: '0.25rem 0.625rem',
-        borderRadius: '9999px',
-        fontSize: '0.75rem',
-        fontWeight: '500',
-        display: 'inline-flex',
-        alignItems: 'center'
-      }}
-    >
-      {displayText}
-    </span>
-  );
+function getIconComponent(iconName: string) {
+  return ICON_MAP[iconName] || Circle;
 }
 
-// Get status code category (SUCCESS, CLIENT_ERROR, SERVER_ERROR)
-function getStatusCodeCategory(
-  statusCode: number | null,
-  statusCodeMappings?: Record<string, string>
-): string | null {
-  if (!statusCode) return null;
-  
-  if (!statusCodeMappings) {
-    // Default categorization
-    if (statusCode >= 200 && statusCode < 300) return 'SUCCESS';
-    if (statusCode >= 400 && statusCode < 500) return 'CLIENT_ERROR';
-    if (statusCode >= 500 && statusCode < 600) return 'SERVER_ERROR';
-    return null;
-  }
-  
-  // Check each category mapping
-  const categories = ['SUCCESS', 'CLIENT_ERROR', 'SERVER_ERROR'];
-  for (const category of categories) {
-    const mapping = statusCodeMappings[category];
-    if (mapping) {
-      const codes = mapping.split(',').map(code => parseInt(code.trim())).filter(code => !isNaN(code));
-      if (codes.includes(statusCode)) {
-        return category;
-      }
-    }
-  }
-  
-  // Fallback to default categorization
-  if (statusCode >= 200 && statusCode < 300) return 'SUCCESS';
-  if (statusCode >= 400 && statusCode < 500) return 'CLIENT_ERROR';
-  if (statusCode >= 500 && statusCode < 600) return 'SERVER_ERROR';
-  return null;
+// Helper to display raw value as-is
+function formatRawValue(value: string | number | null | undefined): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (value === '') return '(empty)';
+  return String(value);
 }
 
-// Get status code badge with custom colors
-function getStatusCodeBadge(
-  statusCode: number | null,
-  statusCodeMappings?: Record<string, string>,
-  statusColors?: Record<string, string>
-) {
-  if (statusCode === null) {
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--neutral-100)] text-[var(--neutral-700)]">
-        null
-      </span>
-    );
-  }
+// Helper to get filter key for null/empty values
+function getFilterKey(value: string | number | null | undefined): string {
+  if (value === null) return '__null__';
+  if (value === undefined) return '__undefined__';
+  if (value === '') return '__empty__';
+  return String(value);
+}
 
-  const category = getStatusCodeCategory(statusCode, statusCodeMappings);
-  
-  // Parse status colors if needed
-  const colors = parseStatusMappings(statusColors);
-  
-  // Default colors
-  const defaultCodeColors: Record<string, string> = {
-    SUCCESS: '#10B981',      // Green
-    CLIENT_ERROR: '#F59E0B', // Amber
-    SERVER_ERROR: '#EF4444', // Red
-  };
-  
-  // Get custom color or use default
-  const colorKey = category ? `CODE_${category}` : null;
-  const customColor = colorKey && colors[colorKey] 
-    ? colors[colorKey] 
-    : (category ? defaultCodeColors[category] : '#6B7280');
-  
-  // Generate lighter background color
-  const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-      r: parseInt(result[1], 16),
-      g: parseInt(result[2], 16),
-      b: parseInt(result[3], 16)
-    } : { r: 107, g: 114, b: 128 };
-  };
-  
-  const rgb = hexToRgb(customColor);
-  const bgColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)`;
-
-  return (
-    <span 
-      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium"
-      style={{ 
-        backgroundColor: bgColor, 
-        color: customColor 
-      }}
-    >
-      {statusCode}
-    </span>
-  );
+// Helper to check if a value matches any filter in a Set
+function matchesFilters(value: string | number | null | undefined, filterSet: Set<string>): boolean {
+  if (filterSet.size === 0) return true; // No filters = match all
+  const key = getFilterKey(value);
+  return filterSet.has(key);
 }
 
 function formatDate(dateString: string) {
@@ -307,6 +106,31 @@ function formatDate(dateString: string) {
   });
 }
 
+function formatDateInput(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+// Get date range presets
+function getDateRange(preset: string): { start: Date; end: Date } {
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  
+  switch (preset) {
+    case 'today':
+      return { start: new Date(now.getFullYear(), now.getMonth(), now.getDate()), end };
+    case '7days':
+      const start7 = new Date(now);
+      start7.setDate(start7.getDate() - 7);
+      return { start: start7, end };
+    case '30days':
+      const start30 = new Date(now);
+      start30.setDate(start30.getDate() - 30);
+      return { start: start30, end };
+    case 'all':
+    default:
+      return { start: new Date(2020, 0, 1), end };
+  }
+}
 
 interface TemplateDetailProps {
   templateName: string;
@@ -315,7 +139,7 @@ interface TemplateDetailProps {
   clientsPath?: string;
 }
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 25;
 
 export default function TemplateDetail({ 
   templateName, 
@@ -328,53 +152,51 @@ export default function TemplateDetail({
   const [data, setData] = useState<TemplateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
-  // Filters
+
+  // Date range state - default to last 30 days
+  const defaultRange = getDateRange('30days');
+  const [startDate, setStartDate] = useState<string>(formatDateInput(defaultRange.start));
+  const [endDate, setEndDate] = useState<string>(formatDateInput(defaultRange.end));
+  const [activeDatePreset, setActiveDatePreset] = useState<string>('30days');
+
+  // Search & filter state - using Sets for multi-select checkboxes
+  const [searchColumn, setSearchColumn] = useState<string>('name');
   const [searchQuery, setSearchQuery] = useState('');
-  // Helper function to format date for input
-  const formatDateForInput = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
+  const [statusCodeFilters, setStatusCodeFilters] = useState<Set<string>>(new Set());
+  const [statusMessageFilters, setStatusMessageFilters] = useState<Set<string>>(new Set());
+  const [deliveryStatusFilters, setDeliveryStatusFilters] = useState<Set<string>>(new Set());
+  
+  // Filter dropdown visibility
+  const [showStatusCodeDropdown, setShowStatusCodeDropdown] = useState(false);
+  const [showStatusMessageDropdown, setShowStatusMessageDropdown] = useState(false);
+  const [showDeliveryStatusDropdown, setShowDeliveryStatusDropdown] = useState(false);
+
+  // Toggle filter value in a Set
+  const toggleFilter = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
+    const newSet = new Set(set);
+    if (newSet.has(value)) {
+      newSet.delete(value);
+    } else {
+      newSet.add(value);
+    }
+    setter(newSet);
+    setCurrentPage(1);
   };
 
-  // Set default date range to last 30 days
-  const getDefaultDateRange = () => {
-    const today = new Date();
-    const monthAgo = new Date(today);
-    monthAgo.setMonth(monthAgo.getMonth() - 1);
-    return {
-      start: formatDateForInput(monthAgo),
-      end: formatDateForInput(today),
-    };
-  };
-
-  const defaultDates = getDefaultDateRange();
-  const [startDate, setStartDate] = useState(defaultDates.start);
-  const [endDate, setEndDate] = useState(defaultDates.end);
-  const [selectedStatusCodes, setSelectedStatusCodes] = useState<Set<number | string>>(new Set());
-  const [selectedStatusMessages, setSelectedStatusMessages] = useState<Set<string>>(new Set());
-  const [selectedDeliveryStatuses, setSelectedDeliveryStatuses] = useState<Set<string>>(new Set());
-  
-  // Filter dropdown states
-  const [showStatusCodeFilter, setShowStatusCodeFilter] = useState(false);
-  const [showStatusMessageFilter, setShowStatusMessageFilter] = useState(false);
-  const [showDeliveryStatusFilter, setShowDeliveryStatusFilter] = useState(false);
-  
-  // Pagination
+  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
 
-  const fetchTemplateData = async (showRefresh = false) => {
+  const fetchTemplateData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
+    else setLoading(true);
     
     try {
-      // Build URL with date parameters
       const params = new URLSearchParams();
       if (startDate) params.append('startDate', startDate);
       if (endDate) params.append('endDate', endDate);
       
-      const url = `/api/analytics/template/${encodeURIComponent(templateName)}${params.toString() ? `?${params.toString()}` : ''}`;
+      const url = `/api/analytics/template/${encodeURIComponent(templateName)}?${params}`;
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -391,152 +213,126 @@ export default function TemplateDetail({
       
       const templateData = await response.json();
       setData(templateData);
+      setCurrentPage(1); // Reset to first page on new data
     } catch (error) {
       console.error('Error fetching template data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [templateName, startDate, endDate, router, loginPath, clientsPath]);
 
   useEffect(() => {
     if (templateName) {
       fetchTemplateData();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateName, startDate, endDate]);
+  }, [templateName, fetchTemplateData]);
 
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.filter-dropdown')) {
-        setShowStatusCodeFilter(false);
-        setShowStatusMessageFilter(false);
-        setShowDeliveryStatusFilter(false);
+  // Get unique values for filter dropdowns - include null and empty strings
+  const uniqueStatusCodes = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const result: { key: string; display: string; value: number | null }[] = [];
+    
+    for (const m of data.messages) {
+      const key = getFilterKey(m.status_code);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ key, display: formatRawValue(m.status_code), value: m.status_code });
       }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Extract unique values for filters
-  const uniqueValues = useMemo(() => {
-    if (!data) {
-      return {
-        statusCodes: [] as number[],
-        statusMessages: [] as string[],
-        deliveryStatuses: [] as string[],
-      };
     }
     
-    const statusCodes = new Set<number | string>();
-    const statusMessages = new Set<string>();
-    const deliveryStatuses = new Set<string>();
-    
-    data.messages.forEach(msg => {
-      // Include null/undefined/empty values - use 'null' as string representation for blanks
-      if (msg.status_code !== null && msg.status_code !== undefined) {
-        statusCodes.add(msg.status_code);
-      } else {
-        statusCodes.add('null');
-      }
-      // Handle status_message - check for null, undefined, or empty string
-      if (msg.status_message !== null && msg.status_message !== undefined && msg.status_message !== '') {
-        statusMessages.add(msg.status_message);
-      } else {
-        statusMessages.add('null');
-      }
-      // Handle message_status - check for null, undefined, or empty string
-      if (msg.message_status !== null && msg.message_status !== undefined && msg.message_status !== '') {
-        deliveryStatuses.add(msg.message_status);
-      } else {
-        deliveryStatuses.add('null');
-      }
+    // Sort: nulls first, then by numeric value
+    return result.sort((a, b) => {
+      if (a.value === null && b.value !== null) return -1;
+      if (a.value !== null && b.value === null) return 1;
+      return (a.value || 0) - (b.value || 0);
     });
-    
-    return {
-      statusCodes: Array.from(statusCodes).sort((a, b) => {
-        if (a === 'null') return 1;
-        if (b === 'null') return -1;
-        if (typeof a === 'number' && typeof b === 'number') return a - b;
-        return String(a).localeCompare(String(b));
-      }),
-      statusMessages: Array.from(statusMessages).sort((a, b) => {
-        if (a === 'null') return 1;
-        if (b === 'null') return -1;
-        return a.localeCompare(b);
-      }),
-      deliveryStatuses: Array.from(deliveryStatuses).sort((a, b) => {
-        if (a === 'null') return 1;
-        if (b === 'null') return -1;
-        return a.localeCompare(b);
-      }),
-    };
   }, [data]);
 
-  // Filter messages
+  const uniqueStatusMessages = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const result: { key: string; display: string }[] = [];
+    
+    for (const m of data.messages) {
+      const key = getFilterKey(m.status_message);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ key, display: formatRawValue(m.status_message) });
+      }
+    }
+    
+    // Sort: nulls first, empty second, then alphabetically
+    return result.sort((a, b) => {
+      if (a.key === '__null__') return -1;
+      if (b.key === '__null__') return 1;
+      if (a.key === '__empty__') return -1;
+      if (b.key === '__empty__') return 1;
+      return a.display.localeCompare(b.display);
+    });
+  }, [data]);
+
+  const uniqueDeliveryStatuses = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const result: { key: string; display: string }[] = [];
+    
+    for (const m of data.messages) {
+      const key = getFilterKey(m.message_status);
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ key, display: formatRawValue(m.message_status) });
+      }
+    }
+    
+    // Sort: nulls first, empty second, then alphabetically
+    return result.sort((a, b) => {
+      if (a.key === '__null__') return -1;
+      if (b.key === '__null__') return 1;
+      if (a.key === '__empty__') return -1;
+      if (b.key === '__empty__') return 1;
+      return a.display.localeCompare(b.display);
+    });
+  }, [data]);
+
+  // Filter and search messages
   const filteredMessages = useMemo(() => {
     if (!data) return [];
     
-    let filtered = data.messages;
-    
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(msg => 
-        (msg.name?.toLowerCase().includes(query)) ||
-        (msg.phone?.includes(query)) ||
-        (msg.message_status?.toLowerCase().includes(query)) ||
-        (msg.status_message?.toLowerCase().includes(query)) ||
-        (query === 'null' && (
-          msg.message_status === null || msg.message_status === undefined || msg.message_status === '' ||
-          msg.status_message === null || msg.status_message === undefined || msg.status_message === '' ||
-          msg.status_code === null || msg.status_code === undefined
-        ))
-      );
-    }
-    
-    // Status code filter
-    if (selectedStatusCodes.size > 0) {
-      filtered = filtered.filter(msg => {
-        // Check if this message matches any selected code
-        const isNull = (msg.status_code === null || msg.status_code === undefined);
-        const matchesNull = selectedStatusCodes.has('null') && isNull;
-        const matchesCode = !isNull && msg.status_code !== null && selectedStatusCodes.has(msg.status_code);
-        return matchesNull || matchesCode;
-      });
-    }
-    
-    // Status message filter
-    if (selectedStatusMessages.size > 0) {
-      filtered = filtered.filter(msg => {
-        // Check if this message matches any selected message
-        const isBlank = (msg.status_message === null || msg.status_message === undefined || msg.status_message === '');
-        const matchesNull = selectedStatusMessages.has('null') && isBlank;
-        const matchesMessage = !isBlank && msg.status_message !== null && msg.status_message !== undefined && selectedStatusMessages.has(msg.status_message);
-        return matchesNull || matchesMessage;
-      });
-    }
-    
-    // Delivery status filter
-    if (selectedDeliveryStatuses.size > 0) {
-      filtered = filtered.filter(msg => {
-        // Check if this message matches any selected status
-        const isBlank = (msg.message_status === null || msg.message_status === undefined || msg.message_status === '');
-        const matchesNull = selectedDeliveryStatuses.has('null') && isBlank;
-        const matchesStatus = !isBlank && msg.message_status !== null && msg.message_status !== undefined && selectedDeliveryStatuses.has(msg.message_status);
-        return matchesNull || matchesStatus;
-      });
-    }
-    
-    // Note: Date range filtering is handled server-side in the API
-    // The messages returned from the API are already filtered by the date range
-    // No need for client-side date filtering here
-    
-    return filtered;
-  }, [data, searchQuery, selectedStatusCodes, selectedStatusMessages, selectedDeliveryStatuses]);
+    return data.messages.filter(message => {
+      // Search filter - search only in selected column
+      if (appliedSearchQuery) {
+        const query = appliedSearchQuery.toLowerCase();
+        let matches = false;
+        
+        if (searchColumn === 'name') {
+          matches = message.name?.toLowerCase().includes(query) || false;
+        } else if (searchColumn === 'phone') {
+          matches = message.phone?.toLowerCase().includes(query) || false;
+        }
+        
+        if (!matches) return false;
+      }
+
+      // Status code filter - using matchesFilters helper for multi-select
+      if (!matchesFilters(message.status_code, statusCodeFilters)) {
+        return false;
+      }
+
+      // Status message filter
+      if (!matchesFilters(message.status_message, statusMessageFilters)) {
+        return false;
+      }
+
+      // Delivery status filter
+      if (!matchesFilters(message.message_status, deliveryStatusFilters)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [data, appliedSearchQuery, searchColumn, statusCodeFilters, statusMessageFilters, deliveryStatusFilters]);
 
   // Pagination
   const totalPages = Math.ceil(filteredMessages.length / ITEMS_PER_PAGE);
@@ -545,129 +341,32 @@ export default function TemplateDetail({
     return filteredMessages.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredMessages, currentPage]);
 
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, startDate, endDate, selectedStatusCodes, selectedStatusMessages, selectedDeliveryStatuses]);
+  const handleDatePreset = (preset: string) => {
+    const range = getDateRange(preset);
+    setStartDate(formatDateInput(range.start));
+    setEndDate(formatDateInput(range.end));
+    setActiveDatePreset(preset);
+  };
 
   const handleBack = () => {
     router.push(`${basePath}/analytics`);
   };
 
-  const clearFilters = () => {
-    setSearchQuery('');
-    // Don't clear date range - it should stay as is
-    setSelectedStatusCodes(new Set());
-    setSelectedStatusMessages(new Set());
-    setSelectedDeliveryStatuses(new Set());
+  const handleSearch = () => {
+    setAppliedSearchQuery(searchQuery);
     setCurrentPage(1);
   };
 
-  const hasActiveFilters = searchQuery || startDate || endDate || selectedStatusCodes.size > 0 || selectedStatusMessages.size > 0 || selectedDeliveryStatuses.size > 0;
-
-  // Export to CSV
-  const exportToCSV = () => {
-    if (!filteredMessages.length) return;
-
-    const headers = [
-      'Name',
-      'Phone',
-      'Status Code',
-      'Status Message',
-      'Delivery Status',
-      'Details',
-      'Created At',
-      'Updated At'
-    ];
-
-    const rows = filteredMessages.map(msg => [
-      msg.name || 'Unknown',
-      msg.phone || 'N/A',
-      msg.status_code?.toString() || 'N/A',
-      msg.status_message || 'N/A',
-      msg.message_status || 'Pending',
-      msg.message_status_detailed || '-',
-      formatDate(msg.created_at),
-      formatDate(msg.updated_at)
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${templateName}_messages_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const clearFilters = () => {
+    setSearchQuery('');
+    setAppliedSearchQuery('');
+    setStatusCodeFilters(new Set());
+    setStatusMessageFilters(new Set());
+    setDeliveryStatusFilters(new Set());
+    setCurrentPage(1);
   };
 
-  // Quick date range presets
-  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'all') => {
-    const today = new Date();
-    
-    switch (preset) {
-      case 'today':
-        setStartDate(formatDateForInput(today));
-        setEndDate(formatDateForInput(today));
-        break;
-      case 'week':
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        setStartDate(formatDateForInput(weekAgo));
-        setEndDate(formatDateForInput(today));
-        break;
-      case 'month':
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        setStartDate(formatDateForInput(monthAgo));
-        setEndDate(formatDateForInput(today));
-        break;
-      case 'all':
-        setStartDate('');
-        setEndDate('');
-        break;
-    }
-  };
-
-  // Check which preset is currently active
-  const getActivePreset = (): 'today' | 'week' | 'month' | 'all' | null => {
-    if (!startDate || !endDate) return 'all';
-    
-    const today = new Date();
-    const todayStr = formatDateForInput(today);
-    
-    // Check if it's "today"
-    if (startDate === todayStr && endDate === todayStr) {
-      return 'today';
-    }
-    
-    // Check if it's "last 7 days"
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekAgoStr = formatDateForInput(weekAgo);
-    if (startDate === weekAgoStr && endDate === todayStr) {
-      return 'week';
-    }
-    
-    // Check if it's "last 30 days"
-    const monthAgo = new Date(today);
-    monthAgo.setMonth(monthAgo.getMonth() - 1);
-    const monthAgoStr = formatDateForInput(monthAgo);
-    if (startDate === monthAgoStr && endDate === todayStr) {
-      return 'month';
-    }
-    
-    return null;
-  };
-
-  const activePreset = getActivePreset();
+  const hasActiveFilters = appliedSearchQuery || statusCodeFilters.size > 0 || statusMessageFilters.size > 0 || deliveryStatusFilters.size > 0;
 
   if (loading) {
     return (
@@ -700,7 +399,7 @@ export default function TemplateDetail({
     );
   }
 
-  const { summary, statusCodeMappings, statusMappings, statusColors = {} } = data;
+  const { metricStats } = data;
 
   return (
     <div className="p-8">
@@ -728,404 +427,341 @@ export default function TemplateDetail({
         </Button>
       </div>
 
-      {/* Date Filter - At the top */}
+      {/* Date Range Filter */}
       <Card className="mb-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col lg:flex-row gap-4 items-end">
-            {/* Date Range */}
-            <div className="flex items-center gap-2 flex-1">
-              <span className="text-sm font-medium text-[var(--neutral-700)] whitespace-nowrap">Date Range:</span>
-              <div className="relative flex-1">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--neutral-400)]" />
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent bg-white"
-                  placeholder="Start date"
-                />
-              </div>
-              <span className="text-[var(--neutral-400)]">to</span>
-              <div className="relative flex-1">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--neutral-400)]" />
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent bg-white"
-                  placeholder="End date"
-                />
-              </div>
-            </div>
-            
-            {/* Quick Date Presets */}
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant={activePreset === 'today' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setDatePreset('today')}
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-[var(--neutral-700)]">
+            <Calendar className="w-4 h-4" />
+            <span>Date Range:</span>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setActiveDatePreset('');
+              }}
+              className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+            />
+            <span className="text-[var(--neutral-500)]">to</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setActiveDatePreset('');
+              }}
+              className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            {['today', '7days', '30days', 'all'].map((preset) => (
+              <button
+                key={preset}
+                onClick={() => handleDatePreset(preset)}
+                className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                  activeDatePreset === preset
+                    ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                    : 'bg-white border-[var(--neutral-200)] text-[var(--neutral-700)] hover:border-[var(--neutral-300)]'
+                }`}
               >
-                Today
-              </Button>
-              <Button
-                type="button"
-                variant={activePreset === 'week' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setDatePreset('week')}
-              >
-                Last 7 Days
-              </Button>
-              <Button
-                type="button"
-                variant={activePreset === 'month' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setDatePreset('month')}
-              >
-                Last 30 Days
-              </Button>
-              <Button
-                type="button"
-                variant={activePreset === 'all' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => {
-                  setStartDate('');
-                  setEndDate('');
-                }}
-              >
-                All Time
-              </Button>
-            </div>
+                {preset === 'today' && 'Today'}
+                {preset === '7days' && 'Last 7 Days'}
+                {preset === '30days' && 'Last 30 Days'}
+                {preset === 'all' && 'All Time'}
+              </button>
+            ))}
           </div>
         </div>
       </Card>
 
-      {/* Stats Grid */}
-      <div className="space-y-4 mb-8">
-        {/* Row 1: Sent, Delivered, Read, Action */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            title="Sent"
-            value={summary.sent}
-            icon={<Send className="w-5 h-5" />}
-            variant="default"
-            customColor={statusColors && statusColors['SENT'] ? String(statusColors['SENT']) : undefined}
-          />
-          <StatCard
-            title="Delivered"
-            value={summary.delivered}
-            icon={<CheckCircle2 className="w-5 h-5" />}
-            variant="success"
-            customColor={statusColors && statusColors['DELIVERED'] ? String(statusColors['DELIVERED']) : undefined}
-          />
-          <StatCard
-            title="Read"
-            value={summary.read}
-            icon={<Eye className="w-5 h-5" />}
-            variant="default"
-            customColor={statusColors && statusColors['READ'] ? String(statusColors['READ']) : undefined}
-          />
-          <StatCard
-            title="Action"
-            value={summary.replied}
-            icon={<MessageSquare className="w-5 h-5" />}
-            variant="default"
-            customColor={statusColors && statusColors['REPLIED'] ? String(statusColors['REPLIED']) : undefined}
-          />
-        </div>
-        
-        {/* Row 2: Total Contacts, HTTP Success, Failed, Pending */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            title="Total Contacts"
-            value={summary.total_contacts}
-            icon={<Users className="w-5 h-5" />}
-            variant="default"
-          />
-          <StatCard
-            title="HTTP Success"
-            value={summary.http_success}
-            icon={<CheckCircle2 className="w-5 h-5" />}
-            variant="success"
-            customColor={statusColors && statusColors['CODE_SUCCESS'] ? String(statusColors['CODE_SUCCESS']) : undefined}
-          />
-          <StatCard
-            title="Failed"
-            value={summary.failed}
-            icon={<XCircle className="w-5 h-5" />}
-            variant="error"
-            customColor={statusColors && statusColors['FAILED'] ? String(statusColors['FAILED']) : undefined}
-          />
-          <StatCard
-            title="Pending"
-            value={summary.pending}
-            icon={<Clock className="w-5 h-5" />}
-            variant="warning"
-            customColor={statusColors && statusColors['PENDING'] ? String(statusColors['PENDING']) : undefined}
-          />
-        </div>
+      {/* Dynamic Stats Grid */}
+      <div className={`grid gap-4 mb-8 ${
+        metricStats.length === 0 ? 'grid-cols-1 md:grid-cols-2' :
+        metricStats.length <= 2 ? 'grid-cols-1 md:grid-cols-2' :
+        metricStats.length <= 3 ? 'grid-cols-2 md:grid-cols-3' :
+        metricStats.length <= 4 ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4' :
+        'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
+      }`}>
+        {/* Dynamic Metric Cards */}
+        {metricStats.map((stat) => {
+          const IconComponent = getIconComponent(stat.icon);
+          return (
+            <Card key={stat.metric_id} className="relative overflow-hidden">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[var(--neutral-600)]">{stat.name}</p>
+                  <p className="mt-2 text-3xl font-semibold" style={{ color: stat.color }}>
+                    {stat.prefix && <span className="text-lg mr-1">{stat.prefix}</span>}
+                    {stat.is_calculated 
+                      ? (Number.isInteger(stat.count) 
+                          ? stat.count.toLocaleString() 
+                          : parseFloat(stat.count.toFixed(2)).toLocaleString())
+                      : stat.count.toLocaleString()}
+                    {stat.unit && <span className="text-lg ml-1">{stat.unit}</span>}
+                  </p>
+                </div>
+                <div 
+                  className="p-2 rounded-lg"
+                  style={{ backgroundColor: `${stat.color}20` }}
+                >
+                  <IconComponent className="w-5 h-5" style={{ color: stat.color }} />
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+
+        {metricStats.length === 0 && (
+          <Card className="relative overflow-hidden">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--neutral-600)]">Metrics</p>
+                <p className="mt-2 text-sm text-[var(--neutral-500)]">
+                  Configure metrics in Settings to see detailed stats
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-[var(--neutral-100)]">
+                <AlertCircle className="w-5 h-5 text-[var(--neutral-400)]" />
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
-
-      {/* Filters & Actions */}
-      <Card className="mb-6">
-        <div className="flex flex-col gap-4">
-          {/* First Row: Search and Export */}
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--neutral-400)]" />
-              <Input
-                type="text"
-                placeholder="Search by name, phone, or status..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            
-            {/* Export */}
-            <Button 
-              variant="secondary"
-              onClick={exportToCSV}
-              disabled={filteredMessages.length === 0}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
-            </Button>
-          </div>
-
-          {/* Second Row: Status Filters */}
-          <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-[var(--neutral-200)]">
-            <span className="text-sm font-medium text-[var(--neutral-700)] flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              Filters:
-            </span>
-            
-            {/* Status Code Filter */}
-            <div className="relative filter-dropdown">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowStatusCodeFilter(!showStatusCodeFilter);
-                  setShowStatusMessageFilter(false);
-                  setShowDeliveryStatusFilter(false);
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-                  selectedStatusCodes.size > 0
-                    ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
-                    : 'border-[var(--neutral-200)] bg-white text-[var(--neutral-700)] hover:bg-[var(--neutral-50)]'
-                }`}
-              >
-                Status Code
-                {selectedStatusCodes.size > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-[var(--primary)] text-white text-xs">
-                    {selectedStatusCodes.size}
-                  </span>
-                )}
-                <ChevronDown className={`w-4 h-4 transition-transform ${showStatusCodeFilter ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {showStatusCodeFilter && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto filter-dropdown">
-                  <div className="p-2">
-                    {uniqueValues.statusCodes.length === 0 ? (
-                      <p className="text-sm text-[var(--neutral-500)] p-2">No status codes available</p>
-                    ) : (
-                      uniqueValues.statusCodes.map((code) => (
-                        <label
-                          key={code}
-                          className="flex items-center gap-2 p-2 rounded hover:bg-[var(--neutral-50)] cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedStatusCodes.has(code)}
-                            onChange={(e) => {
-                              const newSet = new Set(selectedStatusCodes);
-                              if (e.target.checked) {
-                                newSet.add(code);
-                              } else {
-                                newSet.delete(code);
-                              }
-                              setSelectedStatusCodes(newSet);
-                            }}
-                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                          />
-                          <span className="text-sm text-[var(--neutral-700)]">{code}</span>
-                        </label>
-                      ))
-                    )}
-                    {selectedStatusCodes.size > 0 && (
-                      <button
-                        onClick={() => setSelectedStatusCodes(new Set())}
-                        className="w-full mt-2 px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-light)] rounded transition-colors"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Status Message Filter */}
-            <div className="relative filter-dropdown">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowStatusMessageFilter(!showStatusMessageFilter);
-                  setShowStatusCodeFilter(false);
-                  setShowDeliveryStatusFilter(false);
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-                  selectedStatusMessages.size > 0
-                    ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
-                    : 'border-[var(--neutral-200)] bg-white text-[var(--neutral-700)] hover:bg-[var(--neutral-50)]'
-                }`}
-              >
-                Status Message
-                {selectedStatusMessages.size > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-[var(--primary)] text-white text-xs">
-                    {selectedStatusMessages.size}
-                  </span>
-                )}
-                <ChevronDown className={`w-4 h-4 transition-transform ${showStatusMessageFilter ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {showStatusMessageFilter && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto filter-dropdown">
-                  <div className="p-2">
-                    {uniqueValues.statusMessages.length === 0 ? (
-                      <p className="text-sm text-[var(--neutral-500)] p-2">No status messages available</p>
-                    ) : (
-                      uniqueValues.statusMessages.map((msg) => (
-                        <label
-                          key={msg}
-                          className="flex items-center gap-2 p-2 rounded hover:bg-[var(--neutral-50)] cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedStatusMessages.has(msg)}
-                            onChange={(e) => {
-                              const newSet = new Set(selectedStatusMessages);
-                              if (e.target.checked) {
-                                newSet.add(msg);
-                              } else {
-                                newSet.delete(msg);
-                              }
-                              setSelectedStatusMessages(newSet);
-                            }}
-                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                          />
-                          <span className="text-sm text-[var(--neutral-700)] truncate" title={msg}>{msg}</span>
-                        </label>
-                      ))
-                    )}
-                    {selectedStatusMessages.size > 0 && (
-                      <button
-                        onClick={() => setSelectedStatusMessages(new Set())}
-                        className="w-full mt-2 px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-light)] rounded transition-colors"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Delivery Status Filter */}
-            <div className="relative filter-dropdown">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDeliveryStatusFilter(!showDeliveryStatusFilter);
-                  setShowStatusCodeFilter(false);
-                  setShowStatusMessageFilter(false);
-                }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
-                  selectedDeliveryStatuses.size > 0
-                    ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
-                    : 'border-[var(--neutral-200)] bg-white text-[var(--neutral-700)] hover:bg-[var(--neutral-50)]'
-                }`}
-              >
-                Delivery Status
-                {selectedDeliveryStatuses.size > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-[var(--primary)] text-white text-xs">
-                    {selectedDeliveryStatuses.size}
-                  </span>
-                )}
-                <ChevronDown className={`w-4 h-4 transition-transform ${showDeliveryStatusFilter ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {showDeliveryStatusFilter && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto filter-dropdown">
-                  <div className="p-2">
-                    {uniqueValues.deliveryStatuses.length === 0 ? (
-                      <p className="text-sm text-[var(--neutral-500)] p-2">No delivery statuses available</p>
-                    ) : (
-                      uniqueValues.deliveryStatuses.map((status) => (
-                        <label
-                          key={status}
-                          className="flex items-center gap-2 p-2 rounded hover:bg-[var(--neutral-50)] cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedDeliveryStatuses.has(status)}
-                            onChange={(e) => {
-                              const newSet = new Set(selectedDeliveryStatuses);
-                              if (e.target.checked) {
-                                newSet.add(status);
-                              } else {
-                                newSet.delete(status);
-                              }
-                              setSelectedDeliveryStatuses(newSet);
-                            }}
-                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                          />
-                          <span className="text-sm text-[var(--neutral-700)]">{status}</span>
-                        </label>
-                      ))
-                    )}
-                    {selectedDeliveryStatuses.size > 0 && (
-                      <button
-                        onClick={() => setSelectedDeliveryStatuses(new Set())}
-                        className="w-full mt-2 px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-light)] rounded transition-colors"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Clear Filters Button - in same row */}
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="ml-auto flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg text-[var(--error)] hover:bg-[var(--error-light)] transition-colors"
-              >
-                <X className="w-3 h-3" />
-                Clear filters
-              </button>
-            )}
-          </div>
-        </div>
-      </Card>
 
       {/* Messages Table */}
       <Card padding="none">
-        <div className="p-6 border-b border-[var(--neutral-200)] flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-[var(--neutral-900)]">
-            Message Recipients
-          </h3>
-          <span className="text-sm text-[var(--neutral-600)]">
-            {filteredMessages.length === data.messages.length 
-              ? `${data.messages.length} total` 
-              : `${filteredMessages.length} of ${data.messages.length} filtered`
-            }
-          </span>
+        {/* Search & Filters Header */}
+        <div className="p-6 border-b border-[var(--neutral-200)]">
+          <div className="flex flex-col gap-4">
+            {/* Search */}
+            <div className="flex items-center gap-2 max-w-2xl">
+              <select
+                value={searchColumn}
+                onChange={(e) => setSearchColumn(e.target.value)}
+                className="px-3 py-2.5 border border-[var(--neutral-200)] rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              >
+                <option value="name">Name</option>
+                <option value="phone">Phone</option>
+              </select>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Enter search term..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  className="w-full px-4 py-2.5 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                />
+              </div>
+              <Button onClick={handleSearch}>
+                <Search className="w-4 h-4 mr-2" />
+                Search
+              </Button>
+            </div>
+
+            {/* Filter Dropdowns */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm text-[var(--neutral-600)]">
+                <Filter className="w-4 h-4" />
+                <span>Filters:</span>
+              </div>
+
+              {/* Status Code Filter */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowStatusCodeDropdown(!showStatusCodeDropdown);
+                    setShowStatusMessageDropdown(false);
+                    setShowDeliveryStatusDropdown(false);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
+                    statusCodeFilters.size > 0
+                      ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
+                      : 'border-[var(--neutral-200)] hover:border-[var(--neutral-300)]'
+                  }`}
+                >
+                  Status Code
+                  {statusCodeFilters.size > 0 && (
+                    <span className="px-1.5 py-0.5 text-xs bg-[var(--primary)] text-white rounded-full">
+                      {statusCodeFilters.size}
+                    </span>
+                  )}
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {showStatusCodeDropdown && (
+                  <div className="absolute z-20 mt-1 w-48 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <label
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer border-b border-[var(--neutral-200)] font-medium"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={statusCodeFilters.size === 0}
+                        onChange={() => {
+                          setStatusCodeFilters(new Set());
+                          setCurrentPage(1);
+                        }}
+                        className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                      />
+                      All
+                    </label>
+                    {uniqueStatusCodes.map((item) => (
+                      <label
+                        key={item.key}
+                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={statusCodeFilters.has(item.key)}
+                          onChange={() => toggleFilter(statusCodeFilters, item.key, setStatusCodeFilters)}
+                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                        />
+                        {item.display}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Status Message Filter */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowStatusMessageDropdown(!showStatusMessageDropdown);
+                    setShowStatusCodeDropdown(false);
+                    setShowDeliveryStatusDropdown(false);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
+                    statusMessageFilters.size > 0
+                      ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
+                      : 'border-[var(--neutral-200)] hover:border-[var(--neutral-300)]'
+                  }`}
+                >
+                  Status Message
+                  {statusMessageFilters.size > 0 && (
+                    <span className="px-1.5 py-0.5 text-xs bg-[var(--primary)] text-white rounded-full">
+                      {statusMessageFilters.size}
+                    </span>
+                  )}
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {showStatusMessageDropdown && (
+                  <div className="absolute z-20 mt-1 w-56 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <label
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer border-b border-[var(--neutral-200)] font-medium"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={statusMessageFilters.size === 0}
+                        onChange={() => {
+                          setStatusMessageFilters(new Set());
+                          setCurrentPage(1);
+                        }}
+                        className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                      />
+                      All
+                    </label>
+                    {uniqueStatusMessages.map((item) => (
+                      <label
+                        key={item.key}
+                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={statusMessageFilters.has(item.key)}
+                          onChange={() => toggleFilter(statusMessageFilters, item.key, setStatusMessageFilters)}
+                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                        />
+                        <span className="truncate">{item.display}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Delivery Status Filter */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowDeliveryStatusDropdown(!showDeliveryStatusDropdown);
+                    setShowStatusCodeDropdown(false);
+                    setShowStatusMessageDropdown(false);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors ${
+                    deliveryStatusFilters.size > 0
+                      ? 'border-[var(--primary)] bg-[var(--primary-light)] text-[var(--primary)]'
+                      : 'border-[var(--neutral-200)] hover:border-[var(--neutral-300)]'
+                  }`}
+                >
+                  Delivery Status
+                  {deliveryStatusFilters.size > 0 && (
+                    <span className="px-1.5 py-0.5 text-xs bg-[var(--primary)] text-white rounded-full">
+                      {deliveryStatusFilters.size}
+                    </span>
+                  )}
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {showDeliveryStatusDropdown && (
+                  <div className="absolute z-20 mt-1 w-48 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <label
+                      className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer border-b border-[var(--neutral-200)] font-medium"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={deliveryStatusFilters.size === 0}
+                        onChange={() => {
+                          setDeliveryStatusFilters(new Set());
+                          setCurrentPage(1);
+                        }}
+                        className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                      />
+                      All
+                    </label>
+                    {uniqueDeliveryStatuses.map((item) => (
+                      <label
+                        key={item.key}
+                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={deliveryStatusFilters.has(item.key)}
+                          onChange={() => toggleFilter(deliveryStatusFilters, item.key, setDeliveryStatusFilters)}
+                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                        />
+                        {item.display}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {hasActiveFilters && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 px-3 py-2 text-sm text-[var(--error)] hover:text-[var(--error-dark)]"
+                >
+                  <X className="w-4 h-4" />
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -1160,25 +796,37 @@ export default function TemplateDetail({
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2 text-sm font-medium text-[var(--neutral-900)]">
                         <User className="w-4 h-4 text-[var(--neutral-400)]" />
-                        {message.name === null ? 'null' : message.name || 'null'}
+                        <span className={message.name === null || message.name === '' ? 'italic text-[var(--neutral-500)]' : ''}>
+                          {formatRawValue(message.name)}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-[var(--neutral-600)] mt-1">
                         <Phone className="w-4 h-4 text-[var(--neutral-400)]" />
-                        {message.phone === null ? 'null' : message.phone || 'null'}
+                        <span className={message.phone === null || message.phone === '' ? 'italic text-[var(--neutral-500)]' : ''}>
+                          {formatRawValue(message.phone)}
+                        </span>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusCodeBadge(message.status_code, statusCodeMappings, statusColors)}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={message.status_code === null || message.status_code === undefined ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
+                      {formatRawValue(message.status_code)}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-[var(--neutral-700)]">
-                    {(message.status_message === null || message.status_message === undefined || message.status_message === '') ? 'null' : message.status_message}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={message.status_message === null || message.status_message === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
+                      {formatRawValue(message.status_message)}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusBadge(message.message_status, statusMappings, statusColors)}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={message.message_status === null || message.message_status === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
+                      {formatRawValue(message.message_status)}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-[var(--neutral-600)] max-w-xs truncate">
-                    {(message.message_status_detailed === null || message.message_status_detailed === undefined || message.message_status_detailed === '') ? 'null' : message.message_status_detailed}
+                  <td className="px-6 py-4 text-sm max-w-xs truncate">
+                    <span className={message.message_status_detailed === null || message.message_status_detailed === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
+                      {formatRawValue(message.message_status_detailed)}
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-[var(--neutral-600)]">
                     {formatDate(message.created_at)}
@@ -1191,16 +839,13 @@ export default function TemplateDetail({
             </tbody>
           </table>
         </div>
-        
+
         {/* Empty State */}
-        {filteredMessages.length === 0 && (
+        {paginatedMessages.length === 0 && (
           <div className="p-12 text-center">
             <AlertCircle className="w-12 h-12 mx-auto text-[var(--neutral-400)] mb-4" />
             <p className="text-[var(--neutral-600)]">
-              {hasActiveFilters 
-                ? 'No messages match your filters' 
-                : 'No messages found for this template'
-              }
+              {hasActiveFilters ? 'No messages match your filters' : 'No messages found for this template'}
             </p>
             {hasActiveFilters && (
               <button
@@ -1212,26 +857,25 @@ export default function TemplateDetail({
             )}
           </div>
         )}
-        
+
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="p-4 border-t border-[var(--neutral-200)] flex items-center justify-between">
+          <div className="px-6 py-4 border-t border-[var(--neutral-200)] flex items-center justify-between">
             <p className="text-sm text-[var(--neutral-600)]">
               Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredMessages.length)} of {filteredMessages.length} messages
             </p>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
-                className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-100)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-50)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               
-              {/* Page Numbers */}
               <div className="flex items-center gap-1">
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum;
+                  let pageNum: number;
                   if (totalPages <= 5) {
                     pageNum = i + 1;
                   } else if (currentPage <= 3) {
@@ -1241,12 +885,12 @@ export default function TemplateDetail({
                   } else {
                     pageNum = currentPage - 2 + i;
                   }
-                  
+
                   return (
                     <button
                       key={pageNum}
                       onClick={() => setCurrentPage(pageNum)}
-                      className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                      className={`w-8 h-8 rounded-lg text-sm font-medium ${
                         currentPage === pageNum
                           ? 'bg-[var(--primary)] text-white'
                           : 'hover:bg-[var(--neutral-100)] text-[var(--neutral-700)]'
@@ -1257,11 +901,11 @@ export default function TemplateDetail({
                   );
                 })}
               </div>
-              
+
               <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                 disabled={currentPage === totalPages}
-                className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-100)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-50)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

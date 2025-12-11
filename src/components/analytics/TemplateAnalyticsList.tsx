@@ -7,16 +7,56 @@ import {
   FileText,
   ArrowRight,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Send,
+  CheckCircle2,
+  Eye,
+  MessageSquare,
+  Clock,
+  Mail,
+  BarChart3,
+  TrendingUp,
+  Activity,
+  Circle,
+  Phone,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import type { MetricConfig, DynamicMetricStat } from '@/lib/types';
+
+interface TemplateStatsWithMetrics {
+  template_name: string;
+  total: number;
+  metrics: DynamicMetricStat[];
+}
 
 interface AnalyticsData {
   clientId: string;
   clientName: string;
-  templateNames: string[];
+  templateStatsWithMetrics: TemplateStatsWithMetrics[];
+  metrics: MetricConfig[];
+}
+
+// Icon mapping for dynamic metrics
+const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
+  Send,
+  CheckCircle2,
+  Eye,
+  AlertCircle,
+  Clock,
+  MessageSquare,
+  Mail,
+  RefreshCw,
+  BarChart3,
+  TrendingUp,
+  Activity,
+  Circle,
+  Phone,
+};
+
+function getIconComponent(iconName: string) {
+  return ICON_MAP[iconName] || Circle;
 }
 
 interface TemplateAnalyticsListProps {
@@ -66,11 +106,10 @@ export default function TemplateAnalyticsList({
 
   useEffect(() => {
     fetchAnalytics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredTemplates = data?.templateNames.filter(templateName =>
-    templateName.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredTemplates = data?.templateStatsWithMetrics.filter(template =>
+    template.template_name.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
   const handleTemplateClick = (templateName: string) => {
@@ -155,39 +194,38 @@ export default function TemplateAnalyticsList({
             </p>
           </Card>
         ) : (
-          filteredTemplates.map((templateName) => (
-            <Card
-              key={templateName}
-              className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
-              onClick={() => handleTemplateClick(templateName)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
-                    <FileText className="w-5 h-5" />
+          filteredTemplates.map((template) => {
+            return (
+              <Card
+                key={template.template_name}
+                className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
+                onClick={() => handleTemplateClick(template.template_name)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
+                        {template.template_name}
+                      </h3>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
-                      {templateName}
-                    </h3>
-                    <p className="text-sm text-[var(--neutral-500)] mt-1">
-                      Click to view analytics
-                    </p>
+                  <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
+                    <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
                   </div>
                 </div>
-                <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
-                  <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
-                </div>
-              </div>
-            </Card>
-          ))
+              </Card>
+            );
+          })
         )}
       </div>
 
       {/* Summary */}
       {filteredTemplates.length > 0 && (
         <p className="mt-4 text-sm text-[var(--neutral-400)]">
-          Showing {filteredTemplates.length} of {data.templateNames.length} templates
+          Showing {filteredTemplates.length} of {data.templateStatsWithMetrics.length} templates
         </p>
       )}
     </div>

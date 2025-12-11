@@ -311,12 +311,22 @@ export default function ClientSettingsPage() {
 
   const handleEditUser = (user: ClientUser) => {
     setEditingUser(user);
-    setEditUserData({
-      email: user.email,
-      password: '',
-      name: user.name || '',
-      permissions: { ...user.permissions },
-    });
+      setEditUserData({
+        email: user.email,
+        password: '',
+        name: user.name || '',
+        permissions: {
+          journey_builder: user.permissions.journey_builder ?? false,
+          journey_builder_edit: user.permissions.journey_builder_edit ?? false,
+          analytics: user.permissions.analytics ?? false,
+          templates: user.permissions.templates ?? false,
+          campaigns: user.permissions.campaigns ?? false,
+          reports: user.permissions.reports ?? false,
+          integrations: user.permissions.integrations ?? false,
+          settings: user.permissions.settings ?? false,
+          client_settings: user.permissions.client_settings ?? false,
+        },
+      });
     setEditUserError('');
     setShowEditPassword(false);
     setShowEditModal(true);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentClient, getClientUserSession } from '@/lib/auth';
-import { getClientById } from '@/lib/queries';
-import { query } from '@/lib/db';
+import { query, queryOne } from '@/lib/db';
+import { getClientMetrics, getMetricStats } from '@/lib/queries';
 
 interface TemplateMessage {
   id: string;
@@ -15,26 +15,15 @@ interface TemplateMessage {
   updated_at: Date;
 }
 
-interface TemplateSummary {
-  total_contacts: number;
-  sent: number;
-  delivered: number;
-  read: number;
-  replied: number;
-  http_success: number;
-  failed: number;
-  pending: number;
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ templateName: string }> }
 ) {
-  // Check for either super admin session or client user session
-  const adminSession = await getSession();
+  const session = await getSession();
   const clientUserSession = await getClientUserSession();
   
-  if (!adminSession && !clientUserSession) {
+  // Allow both super admin and client users
+  if (!session && !clientUserSession) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -42,322 +31,45 @@ export async function GET(
   let clientId: string | null = null;
   
   if (clientUserSession) {
-    // Client user - use their client_id
     clientId = clientUserSession.client_id;
-  } else if (adminSession) {
-    // Super admin - get selected client
+  } else if (session) {
     clientId = await getCurrentClient();
-    if (!clientId) {
-      return NextResponse.json({ error: 'No client selected' }, { status: 400 });
-    }
   }
-
-  // Final check - clientId should never be null at this point, but TypeScript needs this
+  
   if (!clientId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'No client selected' }, { status: 400 });
   }
 
   const { templateName } = await params;
   const decodedTemplateName = decodeURIComponent(templateName);
-  
-  // Get date filters from query params
+
+  // Get date filter from query params
   const { searchParams } = new URL(request.url);
   const startDate = searchParams.get('startDate');
   const endDate = searchParams.get('endDate');
 
+  // Build date filter clause
+  let dateFilter = '';
+  const queryParams: (string | Date)[] = [clientId, decodedTemplateName];
+  
+  if (startDate && endDate) {
+    // Use date range that includes the full day
+    // Cast created_at to date for comparison
+    dateFilter = ' AND created_at::date >= $3::date AND created_at::date <= $4::date';
+    queryParams.push(startDate, endDate);
+  }
+
   try {
-    // Get client to access status_code_mappings and status_mappings
-    const client = await getClientById(clientId);
-    
-    // Parse status_code_mappings if it's a string (in case of double-encoding)
-    let statusCodeMappings: Record<string, string> = {};
-    if (client?.status_code_mappings) {
-      if (typeof client.status_code_mappings === 'string') {
-        try {
-          statusCodeMappings = JSON.parse(client.status_code_mappings);
-        } catch {
-          statusCodeMappings = {};
-        }
-      } else {
-        statusCodeMappings = client.status_code_mappings as Record<string, string>;
-      }
-    }
-    
-    // Parse status_mappings if it's a string (in case of double-encoding)
-    let statusMappings: Record<string, string> = {};
-    if (client?.status_mappings) {
-      if (typeof client.status_mappings === 'string') {
-        try {
-          statusMappings = JSON.parse(client.status_mappings);
-        } catch {
-          statusMappings = {};
-        }
-      } else {
-        statusMappings = client.status_mappings as Record<string, string>;
-      }
-    }
-    
-    // Parse status_colors if it's a string (in case of double-encoding)
-    let statusColors: Record<string, string> = {};
-    if (client?.status_colors) {
-      if (typeof client.status_colors === 'string') {
-        try {
-          statusColors = JSON.parse(client.status_colors);
-        } catch {
-          statusColors = {};
-        }
-      } else {
-        statusColors = client.status_colors as Record<string, string>;
-      }
-    }
-    
-    // Helper function to get values from status mapping
-    const getStatusValues = (mainStatus: string): string[] => {
-      const mappingValue = statusMappings[mainStatus];
-      if (mappingValue && typeof mappingValue === 'string' && mappingValue.trim()) {
-        // For PENDING, we need to preserve empty strings and convert $empty to empty string
-        if (mainStatus === 'PENDING') {
-          return mappingValue.split(',').map(v => {
-            const trimmed = v.trim();
-            // Convert $empty to actual empty string
-            return trimmed === '$empty' ? '' : trimmed;
-          });
-        }
-        return mappingValue.split(',').map(v => v.trim()).filter(Boolean);
-      }
-      // Default fallback for backwards compatibility
-      const defaults: Record<string, string[]> = {
-        SENT: ['sent', 'Sent', 'SENT'],
-        DELIVERED: ['delivered', 'Delivered', 'DELIVERED'],
-        READ: ['read', 'Read', 'READ'],
-        REPLIED: ['replied', 'Replied', 'REPLIED'],
-        FAILED: ['failed', 'Failed', 'FAILED'],
-        PENDING: ['null', ''] // Default: null and empty string
-      };
-      return defaults[mainStatus] || [];
-    };
-    
-    // Build SQL condition for HTTP success codes
-    // Default: 200-299 range if no mapping exists
-    let httpSuccessCondition = "status_code >= 200 AND status_code < 300";
-    let successCodes: number[] = [];
-    let paramOffset = 2; // $1 = clientId, $2 = templateName
-    
-    if (statusCodeMappings.SUCCESS && typeof statusCodeMappings.SUCCESS === 'string') {
-      successCodes = statusCodeMappings.SUCCESS.split(',')
-        .map(code => parseInt(code.trim()))
-        .filter(code => !isNaN(code));
-      
-      if (successCodes.length > 0) {
-        const placeholders = successCodes.map((_, i) => `$${paramOffset + i + 1}`).join(', ');
-        httpSuccessCondition = `status_code IN (${placeholders})`;
-        paramOffset += successCodes.length;
-      }
-    }
-    
-    // Build status conditions using mappings
-    const sentValues = getStatusValues('SENT');
-    const deliveredValues = getStatusValues('DELIVERED');
-    const readValues = getStatusValues('READ');
-    const repliedValues = getStatusValues('REPLIED');
-    const failedValues = getStatusValues('FAILED');
-    const pendingValues = getStatusValues('PENDING');
-    
-    // Build parameterized conditions
-    const buildStatusCondition = (values: string[], offset: number): { condition: string; params: string[] } => {
-      if (values.length === 0) {
-        return { condition: 'FALSE', params: [] };
-      }
-      const params: string[] = [];
-      const conditions: string[] = [];
-      
-      // Add exact match conditions
-      if (values.length > 0) {
-        const exactPlaceholders = values.map((_, i) => `$${offset + i + 1}`);
-        conditions.push(`message_status IN (${exactPlaceholders.join(', ')})`);
-        params.push(...values);
-        offset += values.length;
-      }
-      
-      // Add case-insensitive conditions
-      if (values.length > 0) {
-        const lowerPlaceholders = values.map((_, i) => `$${offset + i + 1}`);
-        conditions.push(`LOWER(message_status) IN (${lowerPlaceholders.join(', ')})`);
-        params.push(...values.map(v => v.toLowerCase()));
-      }
-      
-      return {
-        condition: `(${conditions.join(' OR ')})`,
-        params
-      };
-    };
-    
-    // Build PENDING condition - special handling for null and empty string
-    const buildPendingCondition = (values: string[], offset: number): { condition: string; params: string[] } => {
-      const conditions: string[] = [];
-      const params: string[] = [];
-      let currentParamIndex = offset;
-      
-      // Check for 'null' in mapping - this means actual NULL in database
-      const hasNull = values.includes('null');
-      if (hasNull) {
-        conditions.push('message_status IS NULL');
-      }
-      
-      // Check for empty string in mapping
-      const hasEmptyString = values.includes('');
-      if (hasEmptyString) {
-        conditions.push(`message_status = ''`);
-      }
-      
-      // Get other values (excluding 'null' and '')
-      const otherValues = values.filter(v => v !== 'null' && v !== '');
-      
-      // Add exact match conditions for other values
-      if (otherValues.length > 0) {
-        const exactPlaceholders = otherValues.map((_, i) => {
-          const placeholder = `$${currentParamIndex + i + 1}`;
-          return placeholder;
-        });
-        conditions.push(`message_status IN (${exactPlaceholders.join(', ')})`);
-        params.push(...otherValues);
-        currentParamIndex += otherValues.length;
-      }
-      
-      // Add case-insensitive conditions for other values
-      if (otherValues.length > 0) {
-        const lowerPlaceholders = otherValues.map((_, i) => {
-          return `$${currentParamIndex + i + 1}`;
-        });
-        conditions.push(`LOWER(message_status) IN (${lowerPlaceholders.join(', ')})`);
-        params.push(...otherValues.map(v => v.toLowerCase()));
-      }
-      
-      if (conditions.length === 0) {
-        return { condition: 'FALSE', params: [] };
-      }
-      
-      return {
-        condition: `(${conditions.join(' OR ')})`,
-        params
-      };
-    };
-    
-    let currentOffset = paramOffset;
-    const sentCond = buildStatusCondition(sentValues, currentOffset);
-    currentOffset += sentCond.params.length;
-    
-    const deliveredCond = buildStatusCondition(deliveredValues, currentOffset);
-    currentOffset += deliveredCond.params.length;
-    
-    const readCond = buildStatusCondition(readValues, currentOffset);
-    currentOffset += readCond.params.length;
-    
-    const repliedCond = buildStatusCondition(repliedValues, currentOffset);
-    currentOffset += repliedCond.params.length;
-    
-    const failedCond = buildStatusCondition(failedValues, currentOffset);
-    currentOffset += failedCond.params.length;
-    
-    const pendingCond = buildPendingCondition(pendingValues, currentOffset);
-    
-    // Get summary stats for this template
-    const queryParams: (string | number)[] = [
-      clientId, 
-      decodedTemplateName, 
-      ...successCodes,
-      ...sentCond.params,
-      ...deliveredCond.params,
-      ...readCond.params,
-      ...repliedCond.params,
-      ...failedCond.params,
-      ...pendingCond.params
-    ];
-    
-    // Build date filter for WHERE clause
-    let dateFilter = '';
-    let dateParamIndex = queryParams.length + 1;
-    if (startDate) {
-      dateFilter += ` AND created_at >= $${dateParamIndex++}`;
-      queryParams.push(startDate);
-    }
-    if (endDate) {
-      dateFilter += ` AND created_at <= $${dateParamIndex++}`;
-      const endDateWithTime = new Date(endDate);
-      endDateWithTime.setHours(23, 59, 59, 999);
-      queryParams.push(endDateWithTime.toISOString());
-    }
-    
-    const summaryResult = await query<{
-      total_contacts: string;
-      sent: string;
-      delivered: string;
-      read: string;
-      replied: string;
-      http_success: string;
-      failed: string;
-      pending: string;
-    }>(`
-      SELECT 
-        COUNT(*)::int as total_contacts,
-        COUNT(CASE 
-          WHEN ${sentCond.condition} OR ${deliveredCond.condition} OR ${readCond.condition} OR ${repliedCond.condition}
-          THEN 1 
-        END)::int as sent,
-        COUNT(CASE 
-          WHEN ${deliveredCond.condition}
-          THEN 1 
-        END)::int as delivered,
-        COUNT(CASE 
-          WHEN ${readCond.condition}
-          THEN 1 
-        END)::int as read,
-        COUNT(CASE 
-          WHEN ${repliedCond.condition}
-          THEN 1 
-        END)::int as replied,
-        COUNT(CASE 
-          WHEN ${httpSuccessCondition}
-          THEN 1 
-        END)::int as http_success,
-        COUNT(CASE 
-          WHEN ${failedCond.condition}
-          THEN 1 
-        END)::int as failed,
-        COUNT(CASE 
-          WHEN ${pendingCond.condition}
-          THEN 1 
-        END)::int as pending
+    // Get total count for this template (with date filter)
+    const totalResult = await queryOne<{ total: string }>(`
+      SELECT COUNT(*)::text as total
       FROM app.message_logs
-      WHERE client_id = $1 AND template_name = $2 ${dateFilter}
+      WHERE client_id = $1 AND template_name = $2${dateFilter}
     `, queryParams);
 
-    const summary: TemplateSummary = {
-      total_contacts: parseInt(summaryResult[0]?.total_contacts || '0'),
-      sent: parseInt(summaryResult[0]?.sent || '0'),
-      delivered: parseInt(summaryResult[0]?.delivered || '0'),
-      read: parseInt(summaryResult[0]?.read || '0'),
-      replied: parseInt(summaryResult[0]?.replied || '0'),
-      http_success: parseInt(summaryResult[0]?.http_success || '0'),
-      failed: parseInt(summaryResult[0]?.failed || '0'),
-      pending: parseInt(summaryResult[0]?.pending || '0'),
-    };
+    const total = parseInt(totalResult?.total || '0');
 
     // Get all messages for this template (with date filter)
-    const messageParams: (string | number)[] = [clientId, decodedTemplateName];
-    let messageDateFilter = '';
-    let messageDateParamIndex = 3;
-    if (startDate) {
-      messageDateFilter += ` AND created_at >= $${messageDateParamIndex++}`;
-      messageParams.push(startDate);
-    }
-    if (endDate) {
-      messageDateFilter += ` AND created_at <= $${messageDateParamIndex++}`;
-      const endDateWithTime = new Date(endDate);
-      endDateWithTime.setHours(23, 59, 59, 999);
-      messageParams.push(endDateWithTime.toISOString());
-    }
-    
     const messages = await query<TemplateMessage>(`
       SELECT 
         id,
@@ -370,28 +82,29 @@ export async function GET(
         created_at,
         updated_at
       FROM app.message_logs
-      WHERE client_id = $1 AND template_name = $2 ${messageDateFilter}
+      WHERE client_id = $1 AND template_name = $2${dateFilter}
       ORDER BY created_at DESC
-    `, messageParams);
+    `, queryParams);
 
-    // Ensure statusColors is a plain object (not a JSONB object with special properties)
-    const plainStatusColors: Record<string, string> = {};
-    if (statusColors && typeof statusColors === 'object') {
-      Object.keys(statusColors).forEach(key => {
-        plainStatusColors[key] = String(statusColors[key]);
-      });
+    // Try to get dynamic metric stats (may fail if table doesn't exist)
+    let metrics: Awaited<ReturnType<typeof getClientMetrics>> = [];
+    let metricStats: Awaited<ReturnType<typeof getMetricStats>> = [];
+
+    try {
+      metrics = await getClientMetrics(clientId);
+      if (metrics.length > 0) {
+        metricStats = await getMetricStats(clientId, decodedTemplateName, startDate || undefined, endDate || undefined);
+      }
+    } catch (metricsError) {
+      console.warn('Could not fetch metrics (table may not exist):', metricsError);
     }
-    
-    console.log('API returning statusColors:', plainStatusColors);
-    console.log('API returning REPLIED color:', plainStatusColors['REPLIED']);
-    
+
     return NextResponse.json({
       templateName: decodedTemplateName,
-      summary,
+      total,
+      metrics,
+      metricStats,
       messages,
-      statusCodeMappings,
-      statusMappings,
-      statusColors: plainStatusColors,
     });
   } catch (error) {
     console.error('Failed to fetch template details:', error);

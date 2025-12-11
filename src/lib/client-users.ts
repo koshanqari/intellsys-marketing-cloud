@@ -22,17 +22,7 @@ export async function createClientUser(data: {
     passwordHash,
     data.name || null,
     data.role || 'viewer',
-    JSON.stringify(data.permissions || { 
-      journey_builder: false,
-      journey_builder_edit: false,
-      analytics: true, 
-      templates: false, 
-      campaigns: false, 
-      reports: false, 
-      integrations: false, 
-      settings: false, 
-      client_settings: false 
-    }),
+    JSON.stringify(data.permissions || { analytics: true, templates: false, settings: false }),
   ]);
   
   if (!result) throw new Error('Failed to create user');

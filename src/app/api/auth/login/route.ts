@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSession, validateCredentials, createClientUserSession, destroySession, destroyClientUserSession } from '@/lib/auth';
+import { createSession, validateCredentials, createClientUserSession } from '@/lib/auth';
 import { validateClientUserPassword } from '@/lib/client-users';
 
 export async function POST(request: NextRequest) {
@@ -13,32 +13,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // First, check if it's a super admin login
+    // Try super admin credentials first
     if (validateCredentials(username, password)) {
-      // Clear any existing client user session first
-      await destroyClientUserSession();
       await createSession(username);
       return NextResponse.json({ 
         success: true, 
-        userType: 'admin',
-        redirectTo: '/clients'
+        userType: 'admin' 
       });
     }
 
-    // If not super admin, check if it's a client user (using email)
+    // Try client user credentials (username can be email)
     const clientUser = await validateClientUserPassword(username, password);
     if (clientUser) {
-      // Clear any existing admin session first
-      await destroySession();
       await createClientUserSession(clientUser);
       return NextResponse.json({ 
         success: true, 
         userType: 'client',
-        redirectTo: '/dashboard/analytics'
+        user: {
+          id: clientUser.id,
+          email: clientUser.email,
+          name: clientUser.name,
+          permissions: clientUser.permissions,
+        }
       });
     }
 
-    // If neither, return error
+    // Neither worked
     return NextResponse.json(
       { error: 'Invalid credentials' },
       { status: 401 }

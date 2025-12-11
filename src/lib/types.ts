@@ -24,9 +24,6 @@ export interface Client {
   sms_enabled: boolean;
   email_enabled: boolean;
   status: string;
-  status_mappings: Record<string, string> | null; // Maps incoming status to normalized status (e.g., {"read": "READ", "Read": "READ"})
-  status_code_mappings: Record<string, string> | null; // Maps status codes to categories (e.g., {"200,201,202": "SUCCESS"})
-  status_colors: Record<string, string> | null; // Custom colors for delivery statuses (e.g., {"SENT": "#3B82F6"})
   created_at: Date;
   updated_at: Date;
   total_messages?: number;
@@ -53,25 +50,24 @@ export interface StatusDistribution {
 }
 
 export interface AnalyticsSummary {
-  total_contacts: number; // Total rows/API hits
-  sent: number; // Sent + Delivered + Read + Replied
+  total_messages: number;
   delivered: number;
   read: number;
-  replied: number;
-  failed: number; // Those with failed status
-  pending: number; // Those with no status
+  failed: number;
+  delivery_rate: number;
+  read_rate: number;
 }
 
 export interface ClientUserPermissions {
-  journey_builder: boolean;
-  journey_builder_edit: boolean; // If journey_builder is true, this controls edit vs view-only
+  journey_builder?: boolean;
+  journey_builder_edit?: boolean;
   analytics: boolean;
-  templates: boolean;
-  campaigns: boolean;
-  reports: boolean;
-  integrations: boolean;
-  settings: boolean;
-  client_settings: boolean; // For Client Settings tab (Client ID, Users, Info, Channels)
+  templates?: boolean;
+  campaigns?: boolean;
+  reports?: boolean;
+  integrations?: boolean;
+  settings?: boolean;
+  client_settings?: boolean;
 }
 
 export interface ClientUser {
@@ -87,20 +83,71 @@ export interface ClientUser {
   updated_at: Date;
 }
 
+// Metric Configuration Types
+export type MetricMapColumn = 'message_status' | 'status_code' | 'status_message' | 'message_status_detailed' | 'template_name' | 'name' | 'phone' | 'message_id';
+
+export interface MetricConfig {
+  id: string;
+  client_id: string;
+  name: string;
+  icon: string; // lucide icon name e.g., 'Send', 'CheckCircle2', 'Eye'
+  color: string; // hex color e.g., '#0D7C3D'
+  map_to_column: MetricMapColumn | null; // null for calculated metrics
+  keywords: string[] | null; // null for calculated metrics
+  sort_order: number;
+  is_active: boolean;
+  is_calculated: boolean;
+  formula: string | null; // Formula for calculated metrics (e.g., "(delivered/sent)*100" or "Math.round((delivered/sent)*100)")
+  prefix: string | null; // Prefix to display before calculated metric value (e.g., "Rs", "$", "USD")
+  unit: string | null; // Unit/suffix to display after calculated metric value (e.g., "%", "Rs", "$")
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface MetricConfigInput {
+  name: string;
+  icon: string;
+  color: string;
+  map_to_column?: MetricMapColumn | null;
+  keywords?: string[] | null;
+  sort_order?: number;
+  is_active?: boolean;
+  is_calculated?: boolean;
+  formula?: string | null;
+  prefix?: string | null;
+  unit?: string | null;
+}
+
+export interface DynamicMetricStat {
+  metric_id: string;
+  name: string;
+  icon: string;
+  color: string;
+  count: number;
+  percentage?: number;
+  is_calculated?: boolean;
+  prefix?: string | null;
+  unit?: string | null;
+}
+
 // Journey Builder Types
 export interface JourneyNodePosition {
   x: number;
   y: number;
 }
 
-export interface JourneyTextNode {
+export interface JourneyNodeSize {
+  width: number;
+  height: number;
+}
+
+export interface JourneyNode {
   id: string;
-  type: 'text';
+  type: 'whatsapp' | 'event' | 'logic' | 'sticky' | 'table';
   position: JourneyNodePosition;
-  data: {
-    content: string;
-  };
+  size?: JourneyNodeSize;
   outputs: string[];
+  data: Record<string, unknown>;
 }
 
 export interface JourneyConnection {
@@ -109,22 +156,14 @@ export interface JourneyConnection {
   targetId: string;
 }
 
-export interface JourneyCanvasState {
-  zoom: number;
-  panX: number;
-  panY: number;
-}
-
 export interface Journey {
   id: string;
-  client_id: string;
   name: string;
   description: string | null;
-  nodes: JourneyTextNode[];
+  nodes: JourneyNode[];
   connections: JourneyConnection[];
-  canvas_state: JourneyCanvasState | null;
-  status: 'draft' | 'active' | 'archived';
-  created_by: string | null;
-  created_at: Date;
-  updated_at: Date;
+  canvas_state: { zoom: number; panX: number; panY: number } | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
