@@ -38,6 +38,7 @@ import type { MetricConfig, DynamicMetricStat } from '@/lib/types';
 
 interface TemplateMessage {
   id: string;
+  message_id: string | null;
   name: string | null;
   phone: string | null;
   status_code: number | null;
@@ -1111,13 +1112,17 @@ export default function TemplateDetail({
 
             {/* Detail Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* ID - Read only */}
+              {/* Message ID - Read only */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
                   Message ID
                 </label>
-                <p className="text-sm text-[var(--neutral-900)] font-mono bg-[var(--neutral-50)] px-3 py-2 rounded-lg break-all">
-                  {selectedMessage.id}
+                <p className={`text-sm font-mono bg-[var(--neutral-50)] px-3 py-2 rounded-lg break-all ${
+                  selectedMessage.message_id === null 
+                    ? 'italic text-[var(--neutral-500)]' 
+                    : 'text-[var(--neutral-900)]'
+                }`}>
+                  {formatRawValue(selectedMessage.message_id)}
                 </p>
               </div>
 

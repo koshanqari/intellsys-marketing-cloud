@@ -5,6 +5,7 @@ import { getClientMetrics, getMetricStats } from '@/lib/queries';
 
 interface TemplateMessage {
   id: string;
+  message_id: string | null;
   name: string | null;
   phone: string | null;
   status_code: number | null;
@@ -214,6 +215,7 @@ export async function GET(
         const messages = await query<TemplateMessage>(`
           SELECT 
             id,
+            message_id,
             name,
             phone,
             status_code,

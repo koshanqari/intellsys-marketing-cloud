@@ -30,3 +30,4 @@ COMMENT ON COLUMN app.client_metrics.prefix IS 'Prefix to display before calcula
 COMMENT ON COLUMN app.client_metrics.unit IS 'Unit/suffix to display after calculated metric value (e.g., %, Rs, $)';
 
 
+

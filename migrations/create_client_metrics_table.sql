@@ -71,3 +71,4 @@ COMMENT ON COLUMN app.client_metrics.keywords IS 'Array of values to match and a
 COMMENT ON COLUMN app.client_metrics.sort_order IS 'Display order in the dashboard (lower = first)';
 
 
+
