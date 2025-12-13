@@ -157,27 +157,27 @@ export default function TemplateAnalyticsList({
           </Card>
         ) : (
           filteredTemplates.map((templateName) => (
-            <Card
+              <Card
               key={templateName}
-              className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
+                className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
               onClick={() => handleTemplateClick(templateName)}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
                       {templateName}
-                    </h3>
+                      </h3>
+                  </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
+                    <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
                   </div>
                 </div>
-                <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
-                  <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
-                </div>
-              </div>
-            </Card>
+              </Card>
           ))
         )}
       </div>

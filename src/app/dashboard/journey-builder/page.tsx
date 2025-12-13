@@ -28,7 +28,13 @@ import {
   Focus,
   AlertCircle,
   Pencil,
-  Link2
+  Link2,
+  MoreVertical,
+  FolderOpen,
+  FolderPlus,
+  MoveHorizontal,
+  ChevronRight,
+  Home
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -119,10 +125,21 @@ interface Journey {
   id: string;
   name: string;
   description: string | null;
+  group_id: string | null;
   nodes: JourneyNode[];
   connections: Connection[];
   canvas_state: { zoom: number; panX: number; panY: number } | null;
   status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface JourneyGroup {
+  id: string;
+  client_id: string;
+  parent_group_id: string | null;
+  name: string;
+  description: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -338,6 +355,35 @@ export default function JourneyBuilderPage() {
   const [editJourneyDescription, setEditJourneyDescription] = useState('');
   const [updatingJourney, setUpdatingJourney] = useState(false);
   
+  // Journey Groups state
+  const [groups, setGroups] = useState<JourneyGroup[]>([]);
+  const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+  const [groupPath, setGroupPath] = useState<JourneyGroup[]>([]); // Breadcrumb path
+  const [allGroups, setAllGroups] = useState<JourneyGroup[]>([]); // For move dropdown
+  const [allJourneys, setAllJourneys] = useState<Journey[]>([]); // All journeys for Journey Link dropdown
+  
+  // Create group modal
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDescription, setNewGroupDescription] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  
+  // Edit group modal
+  const [showEditGroupModal, setShowEditGroupModal] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<JourneyGroup | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDescription, setEditGroupDescription] = useState('');
+  const [updatingGroup, setUpdatingGroup] = useState(false);
+  
+  // Move journey modal
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [movingJourney, setMovingJourney] = useState<Journey | null>(null);
+  const [moveTargetGroupId, setMoveTargetGroupId] = useState<string | null>(null);
+  const [movingJourneyInProgress, setMovingJourneyInProgress] = useState(false);
+  
+  // 3-dot menu state
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  
   // Add node dropdown
   const [showAddMenu, setShowAddMenu] = useState(false);
   
@@ -426,24 +472,24 @@ export default function JourneyBuilderPage() {
     }
   };
 
-  // Fetch journeys on mount
+  // Fetch templates on mount (journeys are fetched via currentGroupId effect)
   useEffect(() => {
-    fetchJourneys();
     fetchTemplates();
   }, []);
 
   // Auto-load journey from URL query parameter
   useEffect(() => {
-    if (journeyIdFromUrl && journeys.length > 0 && !currentJourney && autoLoadedJourneyId !== journeyIdFromUrl) {
-      const journey = journeys.find(j => j.id === journeyIdFromUrl);
+    if (journeyIdFromUrl && allJourneys.length > 0 && !currentJourney && autoLoadedJourneyId !== journeyIdFromUrl) {
+      // Search in allJourneys to find journeys from any folder
+      const journey = allJourneys.find(j => j.id === journeyIdFromUrl);
       if (journey) {
         setAutoLoadedJourneyId(journeyIdFromUrl);
         loadJourney(journey);
       }
     }
-  }, [journeyIdFromUrl, journeys, currentJourney, autoLoadedJourneyId]);
+  }, [journeyIdFromUrl, allJourneys, currentJourney, autoLoadedJourneyId]);
 
-  // Close add menu and template dropdown on click outside
+  // Close add menu, dropdowns, and 3-dot menu on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -458,19 +504,48 @@ export default function JourneyBuilderPage() {
       if (showJourneyDropdown && !target.closest('.journey-dropdown-container')) {
         setShowJourneyDropdown(null);
       }
+      // Close 3-dot menu if clicking outside
+      if (openMenuId && !target.closest('.three-dot-menu')) {
+        setOpenMenuId(null);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTemplateDropdown, showJourneyDropdown]);
+  }, [showTemplateDropdown, showJourneyDropdown, openMenuId]);
 
   // Auto-save removed - user must click Save button manually
 
-  const fetchJourneys = async () => {
+  const fetchJourneysAndGroups = async (groupId: string | null = null) => {
+    setLoadingJourneys(true);
     try {
-      const response = await fetch('/api/journeys');
-      if (response.ok) {
-        const data = await response.json();
+      const groupParam = groupId ? `group_id=${groupId}` : 'group_id=null';
+      
+      // Fetch journeys and groups in parallel
+      const [journeysRes, groupsRes, allGroupsRes, allJourneysRes] = await Promise.all([
+        fetch(`/api/journeys?${groupParam}`),
+        fetch(`/api/journey-groups?parent_group_id=${groupId || 'null'}`),
+        fetch('/api/journey-groups'), // Get all groups for move dropdown
+        fetch('/api/journeys?all=true'), // Get all journeys for Journey Link dropdown
+      ]);
+      
+      if (journeysRes.ok) {
+        const data = await journeysRes.json();
         setJourneys(data);
+      }
+      
+      if (groupsRes.ok) {
+        const data = await groupsRes.json();
+        setGroups(data);
+      }
+      
+      if (allGroupsRes.ok) {
+        const data = await allGroupsRes.json();
+        setAllGroups(data);
+      }
+      
+      if (allJourneysRes.ok) {
+        const data = await allJourneysRes.json();
+        setAllJourneys(data);
       }
     } catch (error) {
       console.error('Failed to fetch journeys:', error);
@@ -478,6 +553,39 @@ export default function JourneyBuilderPage() {
       setLoadingJourneys(false);
     }
   };
+
+  // Navigate into a group
+  const navigateToGroup = async (group: JourneyGroup | null) => {
+    if (group) {
+      setCurrentGroupId(group.id);
+      setGroupPath([...groupPath, group]);
+    } else {
+      // Navigate to root
+      setCurrentGroupId(null);
+      setGroupPath([]);
+    }
+  };
+
+  // Navigate to a specific point in breadcrumb
+  const navigateToBreadcrumb = (index: number) => {
+    if (index === -1) {
+      // Go to root
+      setCurrentGroupId(null);
+      setGroupPath([]);
+    } else {
+      const group = groupPath[index];
+      setCurrentGroupId(group.id);
+      setGroupPath(groupPath.slice(0, index + 1));
+    }
+  };
+
+  // Fetch when currentGroupId changes
+  useEffect(() => {
+    fetchJourneysAndGroups(currentGroupId);
+  }, [currentGroupId]);
+
+  // Legacy function name for compatibility
+  const fetchJourneys = () => fetchJourneysAndGroups(currentGroupId);
 
   const createJourney = async () => {
     if (!newJourneyName.trim()) return;
@@ -490,6 +598,7 @@ export default function JourneyBuilderPage() {
         body: JSON.stringify({
           name: newJourneyName,
           description: newJourneyDescription || null,
+          group_id: currentGroupId,
         }),
       });
       
@@ -611,6 +720,129 @@ export default function JourneyBuilderPage() {
       console.error('Failed to update journey:', error);
     } finally {
       setUpdatingJourney(false);
+    }
+  };
+
+  // Group CRUD operations
+  const createGroup = async () => {
+    if (!newGroupName.trim()) return;
+    
+    setCreatingGroup(true);
+    try {
+      const response = await fetch('/api/journey-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGroupName,
+          description: newGroupDescription || null,
+          parent_group_id: currentGroupId,
+        }),
+      });
+      
+      if (response.ok) {
+        const group = await response.json();
+        setGroups([...groups, group]);
+        setAllGroups([...allGroups, group]);
+        setShowCreateGroupModal(false);
+        setNewGroupName('');
+        setNewGroupDescription('');
+      }
+    } catch (error) {
+      console.error('Failed to create group:', error);
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const openEditGroupModal = (group: JourneyGroup, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingGroup(group);
+    setEditGroupName(group.name);
+    setEditGroupDescription(group.description || '');
+    setShowEditGroupModal(true);
+    setOpenMenuId(null);
+  };
+
+  const updateGroupDetails = async () => {
+    if (!editingGroup || !editGroupName.trim()) return;
+    
+    setUpdatingGroup(true);
+    try {
+      const response = await fetch(`/api/journey-groups/${editingGroup.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editGroupName,
+          description: editGroupDescription || null,
+        }),
+      });
+      
+      if (response.ok) {
+        await response.json();
+        setGroups(groups.map(g => g.id === editingGroup.id ? { ...g, name: editGroupName, description: editGroupDescription || null } : g));
+        setAllGroups(allGroups.map(g => g.id === editingGroup.id ? { ...g, name: editGroupName, description: editGroupDescription || null } : g));
+        setShowEditGroupModal(false);
+        setEditingGroup(null);
+      }
+    } catch (error) {
+      console.error('Failed to update group:', error);
+    } finally {
+      setUpdatingGroup(false);
+    }
+  };
+
+  const deleteGroup = async (groupId: string) => {
+    if (!confirm('Are you sure you want to delete this group? Journeys and sub-groups inside will be moved to the parent folder.')) return;
+    
+    try {
+      const response = await fetch(`/api/journey-groups/${groupId}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        // Refresh to get updated list (journeys moved to parent)
+        fetchJourneysAndGroups(currentGroupId);
+      }
+    } catch (error) {
+      console.error('Failed to delete group:', error);
+    }
+    setOpenMenuId(null);
+  };
+
+  // Move journey
+  const openMoveModal = (journey: Journey, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMovingJourney(journey);
+    setMoveTargetGroupId(journey.group_id);
+    setShowMoveModal(true);
+    setOpenMenuId(null);
+  };
+
+  const moveJourney = async () => {
+    if (!movingJourney) return;
+    
+    setMovingJourneyInProgress(true);
+    try {
+      const response = await fetch(`/api/journeys/${movingJourney.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          group_id: moveTargetGroupId,
+        }),
+      });
+      
+      if (response.ok) {
+        // Remove from current view if moved to different group
+        if (moveTargetGroupId !== currentGroupId) {
+          setJourneys(journeys.filter(j => j.id !== movingJourney.id));
+        }
+        setShowMoveModal(false);
+        setMovingJourney(null);
+      }
+    } catch (error) {
+      console.error('Failed to move journey:', error);
+    } finally {
+      setMovingJourneyInProgress(false);
     }
   };
 
@@ -1959,8 +2191,8 @@ export default function JourneyBuilderPage() {
     // Journey Link node
     if (nodeType === 'journey') {
       const journeyLinkNode = node as JourneyLinkNode;
-      // Filter out current journey from the list
-      const availableJourneys = journeys.filter(j => j.id !== currentJourney?.id);
+      // Filter out current journey from the list - use allJourneys to show journeys from all folders
+      const availableJourneys = allJourneys.filter(j => j.id !== currentJourney?.id);
       
       return (
         <div
@@ -2123,32 +2355,136 @@ export default function JourneyBuilderPage() {
             <h1 className="text-2xl font-semibold text-[var(--neutral-900)]">Journey Builder</h1>
             <p className="text-[var(--neutral-500)] mt-1">Create and manage message flows</p>
           </div>
-          <Button onClick={() => setShowCreateModal(true)} disabled={!canEdit}>
-            <Plus className="w-4 h-4 mr-2" />
-            New Journey
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowCreateGroupModal(true)} disabled={!canEdit}>
+              <FolderPlus className="w-4 h-4 mr-2" />
+              New Group
+            </Button>
+            <Button onClick={() => setShowCreateModal(true)} disabled={!canEdit}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Journey
+            </Button>
+          </div>
         </div>
+
+        {/* Breadcrumb Navigation */}
+        {groupPath.length > 0 && (
+          <div className="flex items-center gap-2 mb-4 text-sm">
+            <button
+              onClick={() => navigateToBreadcrumb(-1)}
+              className="flex items-center gap-1 text-[var(--neutral-600)] hover:text-[var(--primary)] transition-colors"
+            >
+              <Home className="w-4 h-4" />
+              <span>Home</span>
+            </button>
+            {groupPath.map((group, index) => (
+              <div key={group.id} className="flex items-center gap-2">
+                <ChevronRight className="w-4 h-4 text-[var(--neutral-400)]" />
+                <button
+                  onClick={() => navigateToBreadcrumb(index)}
+                  className={`hover:text-[var(--primary)] transition-colors ${
+                    index === groupPath.length - 1 
+                      ? 'font-medium text-[var(--neutral-900)]' 
+                      : 'text-[var(--neutral-600)]'
+                  }`}
+                >
+                  {group.name}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loadingJourneys ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
           </div>
-        ) : journeys.length === 0 ? (
+        ) : groups.length === 0 && journeys.length === 0 ? (
           <Card className="text-center py-12">
             <FileText className="w-12 h-12 text-[var(--neutral-300)] mx-auto mb-4" />
             <h3 className="text-lg font-medium text-[var(--neutral-900)] mb-2">
-              No journeys yet
+              {groupPath.length > 0 ? 'This folder is empty' : 'No journeys yet'}
             </h3>
             <p className="text-sm text-[var(--neutral-500)] mb-4">
-              Create your first journey to start building message flows
+              {groupPath.length > 0 
+                ? 'Create a journey or sub-group here'
+                : 'Create your first journey to start building message flows'}
             </p>
-            <Button onClick={() => setShowCreateModal(true)} disabled={!canEdit}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Journey
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              <Button variant="secondary" onClick={() => setShowCreateGroupModal(true)} disabled={!canEdit}>
+                <FolderPlus className="w-4 h-4 mr-2" />
+                Create Group
+              </Button>
+              <Button onClick={() => setShowCreateModal(true)} disabled={!canEdit}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Journey
+              </Button>
+            </div>
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Groups */}
+            {groups.map(group => (
+              <Card 
+                key={group.id}
+                className="cursor-pointer hover:border-[var(--primary)] transition-colors bg-[var(--neutral-50)]"
+                onClick={() => navigateToGroup(group)}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="p-2 rounded-lg bg-[var(--primary-light)]">
+                      <FolderOpen className="w-5 h-5 text-[var(--primary)]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-[var(--neutral-900)] truncate">
+                        {group.name}
+                      </h3>
+                      {group.description && (
+                        <p className="text-sm text-[var(--neutral-500)] mt-1 line-clamp-1">
+                          {group.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <div className="relative three-dot-menu">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId(openMenuId === `group-${group.id}` ? null : `group-${group.id}`);
+                        }}
+                        className="p-2 rounded-lg hover:bg-[var(--neutral-200)] text-[var(--neutral-400)] hover:text-[var(--neutral-600)] transition-colors"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                      {openMenuId === `group-${group.id}` && (
+                        <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50">
+                          <button
+                            onClick={(e) => openEditGroupModal(group, e)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-[var(--neutral-50)] transition-colors"
+                          >
+                            <Pencil className="w-4 h-4" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteGroup(group.id);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left text-[var(--error)] hover:bg-[var(--error-light)] transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+
+            {/* Journeys */}
             {journeys.map(journey => (
               <Card 
                 key={journey.id}
@@ -2167,24 +2503,45 @@ export default function JourneyBuilderPage() {
                     )}
                   </div>
                   {canEdit && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => openEditJourneyModal(journey, e)}
-                        className="p-2 rounded-lg hover:bg-[var(--neutral-100)] text-[var(--neutral-400)] hover:text-[var(--neutral-600)] transition-colors"
-                        title="Edit Journey"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
+                    <div className="relative three-dot-menu">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteJourney(journey.id);
+                          setOpenMenuId(openMenuId === `journey-${journey.id}` ? null : `journey-${journey.id}`);
                         }}
-                        className="p-2 rounded-lg hover:bg-[var(--error-light)] text-[var(--neutral-400)] hover:text-[var(--error)] transition-colors"
-                        title="Delete Journey"
+                        className="p-2 rounded-lg hover:bg-[var(--neutral-100)] text-[var(--neutral-400)] hover:text-[var(--neutral-600)] transition-colors"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <MoreVertical className="w-4 h-4" />
                       </button>
+                      {openMenuId === `journey-${journey.id}` && (
+                        <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50">
+                          <button
+                            onClick={(e) => openEditJourneyModal(journey, e)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-[var(--neutral-50)] transition-colors"
+                          >
+                            <Pencil className="w-4 h-4" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={(e) => openMoveModal(journey, e)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-[var(--neutral-50)] transition-colors"
+                          >
+                            <MoveHorizontal className="w-4 h-4" />
+                            Move
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(null);
+                              deleteJourney(journey.id);
+                            }}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-left text-[var(--error)] hover:bg-[var(--error-light)] transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2268,6 +2625,144 @@ export default function JourneyBuilderPage() {
               </Button>
               <Button onClick={updateJourneyDetails} loading={updatingJourney} disabled={!editJourneyName.trim()}>
                 Save Changes
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Create Group Modal */}
+        <Modal
+          isOpen={showCreateGroupModal}
+          onClose={() => setShowCreateGroupModal(false)}
+          title="Create New Group"
+        >
+          <div className="space-y-4">
+            <Input
+              label="Group Name"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              placeholder="e.g., Marketing Flows"
+              required
+            />
+            <div>
+              <label className="block text-sm font-medium text-[var(--neutral-700)] mb-1">
+                Description (optional)
+              </label>
+              <textarea
+                value={newGroupDescription}
+                onChange={(e) => setNewGroupDescription(e.target.value)}
+                placeholder="Describe what journeys this group contains..."
+                className="w-full px-4 py-2 border border-[var(--neutral-200)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => setShowCreateGroupModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={createGroup} loading={creatingGroup} disabled={!newGroupName.trim()}>
+                Create Group
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit Group Modal */}
+        <Modal
+          isOpen={showEditGroupModal}
+          onClose={() => {
+            setShowEditGroupModal(false);
+            setEditingGroup(null);
+          }}
+          title="Edit Group"
+        >
+          <div className="space-y-4">
+            <Input
+              label="Group Name"
+              value={editGroupName}
+              onChange={(e) => setEditGroupName(e.target.value)}
+              placeholder="e.g., Marketing Flows"
+              required
+            />
+            <div>
+              <label className="block text-sm font-medium text-[var(--neutral-700)] mb-1">
+                Description (optional)
+              </label>
+              <textarea
+                value={editGroupDescription}
+                onChange={(e) => setEditGroupDescription(e.target.value)}
+                placeholder="Describe what journeys this group contains..."
+                className="w-full px-4 py-2 border border-[var(--neutral-200)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => {
+                setShowEditGroupModal(false);
+                setEditingGroup(null);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={updateGroupDetails} loading={updatingGroup} disabled={!editGroupName.trim()}>
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Move Journey Modal */}
+        <Modal
+          isOpen={showMoveModal}
+          onClose={() => {
+            setShowMoveModal(false);
+            setMovingJourney(null);
+          }}
+          title="Move Journey"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--neutral-600)]">
+              Move <span className="font-medium">{movingJourney?.name}</span> to:
+            </p>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {/* Root option */}
+              <label className="flex items-center gap-3 p-3 rounded-lg border border-[var(--neutral-200)] cursor-pointer hover:bg-[var(--neutral-50)] transition-colors">
+                <input
+                  type="radio"
+                  name="moveTarget"
+                  checked={moveTargetGroupId === null}
+                  onChange={() => setMoveTargetGroupId(null)}
+                  className="w-4 h-4 text-[var(--primary)]"
+                />
+                <Home className="w-4 h-4 text-[var(--neutral-500)]" />
+                <span className="text-sm">Root (Home)</span>
+              </label>
+              {/* Group options */}
+              {allGroups.map(group => (
+                <label 
+                  key={group.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-[var(--neutral-200)] cursor-pointer hover:bg-[var(--neutral-50)] transition-colors"
+                >
+                  <input
+                    type="radio"
+                    name="moveTarget"
+                    checked={moveTargetGroupId === group.id}
+                    onChange={() => setMoveTargetGroupId(group.id)}
+                    className="w-4 h-4 text-[var(--primary)]"
+                  />
+                  <FolderOpen className="w-4 h-4 text-[var(--primary)]" />
+                  <span className="text-sm">{group.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => {
+                setShowMoveModal(false);
+                setMovingJourney(null);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={moveJourney} loading={movingJourneyInProgress}>
+                Move Journey
               </Button>
             </div>
           </div>
