@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, LogOut, ArrowRight, Plus, Mail, Phone, Building } from 'lucide-react';
+import { LogOut, ArrowRight, Plus, Mail, Phone, Building } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
@@ -183,12 +183,6 @@ export default function ClientsPage() {
                         {client.industry}
                       </p>
                     )}
-                    <div className="mt-3 flex items-center gap-2 text-[var(--neutral-600)]">
-                      <MessageSquare className="w-4 h-4" />
-                      <span className="text-sm">
-                        {client.total_messages.toLocaleString()} messages
-                      </span>
-                    </div>
                     {(client.email || client.phone) && (
                       <div className="mt-2 flex flex-wrap gap-3 text-sm text-[var(--neutral-500)]">
                         {client.email && (

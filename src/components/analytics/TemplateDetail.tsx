@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft,
@@ -48,12 +48,25 @@ interface TemplateMessage {
   updated_at: string;
 }
 
+interface FilterOption {
+  value: string | null;
+  count: number;
+}
+
 interface TemplateData {
   templateName: string;
   total: number;
   metrics: MetricConfig[];
   metricStats: DynamicMetricStat[];
+  filterOptions: {
+    statusCodes: FilterOption[];
+    statusMessages: FilterOption[];
+    deliveryStatuses: FilterOption[];
+  };
   messages: TemplateMessage[];
+  filteredCount: number;
+  page: number;
+  totalPages: number;
 }
 
 // Icon mapping for dynamic metrics
@@ -101,13 +114,6 @@ function getFilterKey(value: string | number | null | undefined): string {
   return String(value);
 }
 
-// Helper to check if a value matches any filter in a Set
-function matchesFilters(value: string | number | null | undefined, filterSet: Set<string>): boolean {
-  if (filterSet.size === 0) return true; // No filters = match all
-  const key = getFilterKey(value);
-  return filterSet.has(key);
-}
-
 function formatDate(dateString: string) {
   const date = new Date(dateString);
   return date.toLocaleString('en-US', {
@@ -152,8 +158,6 @@ interface TemplateDetailProps {
   clientsPath?: string;
 }
 
-const ITEMS_PER_PAGE = 25;
-
 export default function TemplateDetail({ 
   templateName, 
   basePath,
@@ -180,6 +184,28 @@ export default function TemplateDetail({
   const [deleting, setDeleting] = useState(false);
   const [detailError, setDetailError] = useState('');
 
+  // Date range state - default to last 30 days
+  const defaultRange = getDateRange('30days');
+  const [startDate, setStartDate] = useState<string>(formatDateInput(defaultRange.start));
+  const [endDate, setEndDate] = useState<string>(formatDateInput(defaultRange.end));
+  const [activeDatePreset, setActiveDatePreset] = useState<string>('30days');
+
+  // Search & filter state
+  const [searchColumn, setSearchColumn] = useState<string>('name');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+  const [statusCodeFilters, setStatusCodeFilters] = useState<Set<string>>(new Set());
+  const [statusMessageFilters, setStatusMessageFilters] = useState<Set<string>>(new Set());
+  const [deliveryStatusFilters, setDeliveryStatusFilters] = useState<Set<string>>(new Set());
+  
+  // Filter dropdown visibility
+  const [showStatusCodeDropdown, setShowStatusCodeDropdown] = useState(false);
+  const [showStatusMessageDropdown, setShowStatusMessageDropdown] = useState(false);
+  const [showDeliveryStatusDropdown, setShowDeliveryStatusDropdown] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Fetch permissions on mount
   useEffect(() => {
     const fetchPermissions = async () => {
@@ -203,50 +229,45 @@ export default function TemplateDetail({
     fetchPermissions();
   }, []);
 
-  // Date range state - default to last 30 days
-  const defaultRange = getDateRange('30days');
-  const [startDate, setStartDate] = useState<string>(formatDateInput(defaultRange.start));
-  const [endDate, setEndDate] = useState<string>(formatDateInput(defaultRange.end));
-  const [activeDatePreset, setActiveDatePreset] = useState<string>('30days');
-
-  // Search & filter state - using Sets for multi-select checkboxes
-  const [searchColumn, setSearchColumn] = useState<string>('name');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
-  const [statusCodeFilters, setStatusCodeFilters] = useState<Set<string>>(new Set());
-  const [statusMessageFilters, setStatusMessageFilters] = useState<Set<string>>(new Set());
-  const [deliveryStatusFilters, setDeliveryStatusFilters] = useState<Set<string>>(new Set());
-  
-  // Filter dropdown visibility
-  const [showStatusCodeDropdown, setShowStatusCodeDropdown] = useState(false);
-  const [showStatusMessageDropdown, setShowStatusMessageDropdown] = useState(false);
-  const [showDeliveryStatusDropdown, setShowDeliveryStatusDropdown] = useState(false);
-
-  // Toggle filter value in a Set
-  const toggleFilter = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
-    const newSet = new Set(set);
-    if (newSet.has(value)) {
-      newSet.delete(value);
-    } else {
-      newSet.add(value);
+  // Build API URL with all parameters
+  const buildApiUrl = useCallback((page: number) => {
+    const params = new URLSearchParams();
+    
+    // If searching, ignore date range (search across all time)
+    // Otherwise, apply date range filter
+    if (!searchQuery) {
+      params.append('startDate', startDate);
+      params.append('endDate', endDate);
     }
-    setter(newSet);
-    setCurrentPage(1);
-  };
+    
+    params.append('page', String(page));
+    
+    if (searchQuery) {
+      params.append('searchColumn', searchColumn);
+      params.append('searchQuery', searchQuery);
+    }
+    
+    if (statusCodeFilters.size > 0) {
+      params.append('statusCode', Array.from(statusCodeFilters).join(','));
+    }
+    
+    if (statusMessageFilters.size > 0) {
+      params.append('statusMessage', Array.from(statusMessageFilters).join(','));
+    }
+    
+    if (deliveryStatusFilters.size > 0) {
+      params.append('deliveryStatus', Array.from(deliveryStatusFilters).join(','));
+    }
+    
+    return `/api/analytics/template/${encodeURIComponent(templateName)}?${params}`;
+  }, [templateName, startDate, endDate, searchColumn, searchQuery, statusCodeFilters, statusMessageFilters, deliveryStatusFilters]);
 
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-
-  const fetchTemplateData = useCallback(async (showRefresh = false) => {
+  const fetchTemplateData = useCallback(async (page: number = 1, showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
-    else setLoading(true);
+    else if (page === 1) setLoading(true);
     
     try {
-      const params = new URLSearchParams();
-      if (startDate) params.append('startDate', startDate);
-      if (endDate) params.append('endDate', endDate);
-      
-      const url = `/api/analytics/template/${encodeURIComponent(templateName)}?${params}`;
+      const url = buildApiUrl(page);
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -263,133 +284,52 @@ export default function TemplateDetail({
       
       const templateData = await response.json();
       setData(templateData);
-      setCurrentPage(1); // Reset to first page on new data
+      setCurrentPage(page);
     } catch (error) {
       console.error('Error fetching template data:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [templateName, startDate, endDate, router, loginPath, clientsPath]);
+  }, [buildApiUrl, router, loginPath, clientsPath]);
 
+  // Initial load
   useEffect(() => {
     if (templateName) {
-      fetchTemplateData();
+      fetchTemplateData(1);
     }
-  }, [templateName, fetchTemplateData]);
+  }, [templateName]); // Only on initial mount
 
-  // Get unique values for filter dropdowns - include null and empty strings
-  const uniqueStatusCodes = useMemo(() => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const result: { key: string; display: string; value: number | null }[] = [];
-    
-    for (const m of data.messages) {
-      const key = getFilterKey(m.status_code);
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push({ key, display: formatRawValue(m.status_code), value: m.status_code });
-      }
+  // Refetch when date range changes
+  useEffect(() => {
+    if (templateName && !loading) {
+      fetchTemplateData(1);
     }
-    
-    // Sort: nulls first, then by numeric value
-    return result.sort((a, b) => {
-      if (a.value === null && b.value !== null) return -1;
-      if (a.value !== null && b.value === null) return 1;
-      return (a.value || 0) - (b.value || 0);
-    });
-  }, [data]);
+  }, [startDate, endDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const uniqueStatusMessages = useMemo(() => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const result: { key: string; display: string }[] = [];
-    
-    for (const m of data.messages) {
-      const key = getFilterKey(m.status_message);
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push({ key, display: formatRawValue(m.status_message) });
-      }
+  // Toggle filter value
+  const toggleFilter = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
+    const newSet = new Set(set);
+    if (newSet.has(value)) {
+      newSet.delete(value);
+    } else {
+      newSet.add(value);
     }
-    
-    // Sort: nulls first, empty second, then alphabetically
-    return result.sort((a, b) => {
-      if (a.key === '__null__') return -1;
-      if (b.key === '__null__') return 1;
-      if (a.key === '__empty__') return -1;
-      if (b.key === '__empty__') return 1;
-      return a.display.localeCompare(b.display);
-    });
-  }, [data]);
+    setter(newSet);
+  };
 
-  const uniqueDeliveryStatuses = useMemo(() => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const result: { key: string; display: string }[] = [];
-    
-    for (const m of data.messages) {
-      const key = getFilterKey(m.message_status);
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push({ key, display: formatRawValue(m.message_status) });
-      }
+  // Apply filters - fetch from server
+  const applyFilters = useCallback(() => {
+    setSearchQuery(pendingSearchQuery);
+    // This will trigger a refetch via useEffect or we call it directly
+  }, [pendingSearchQuery]);
+
+  // Effect to refetch when filters change
+  useEffect(() => {
+    if (!loading && data) {
+      fetchTemplateData(1);
     }
-    
-    // Sort: nulls first, empty second, then alphabetically
-    return result.sort((a, b) => {
-      if (a.key === '__null__') return -1;
-      if (b.key === '__null__') return 1;
-      if (a.key === '__empty__') return -1;
-      if (b.key === '__empty__') return 1;
-      return a.display.localeCompare(b.display);
-    });
-  }, [data]);
-
-  // Filter and search messages
-  const filteredMessages = useMemo(() => {
-    if (!data) return [];
-    
-    return data.messages.filter(message => {
-      // Search filter - search only in selected column
-      if (appliedSearchQuery) {
-        const query = appliedSearchQuery.toLowerCase();
-        let matches = false;
-        
-        if (searchColumn === 'name') {
-          matches = message.name?.toLowerCase().includes(query) || false;
-        } else if (searchColumn === 'phone') {
-          matches = message.phone?.toLowerCase().includes(query) || false;
-        }
-        
-        if (!matches) return false;
-      }
-
-      // Status code filter - using matchesFilters helper for multi-select
-      if (!matchesFilters(message.status_code, statusCodeFilters)) {
-        return false;
-      }
-
-      // Status message filter
-      if (!matchesFilters(message.status_message, statusMessageFilters)) {
-        return false;
-      }
-
-      // Delivery status filter
-      if (!matchesFilters(message.message_status, deliveryStatusFilters)) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [data, appliedSearchQuery, searchColumn, statusCodeFilters, statusMessageFilters, deliveryStatusFilters]);
-
-  // Pagination
-  const totalPages = Math.ceil(filteredMessages.length / ITEMS_PER_PAGE);
-  const paginatedMessages = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredMessages.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredMessages, currentPage]);
+  }, [searchQuery, statusCodeFilters, statusMessageFilters, deliveryStatusFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDatePreset = (preset: string) => {
     const range = getDateRange(preset);
@@ -403,20 +343,27 @@ export default function TemplateDetail({
   };
 
   const handleSearch = () => {
-    setAppliedSearchQuery(searchQuery);
-    setCurrentPage(1);
+    if (pendingSearchQuery) {
+      // Clear date range when searching (search across all time)
+      setActiveDatePreset('');
+    }
+    setSearchQuery(pendingSearchQuery);
   };
 
   const clearFilters = () => {
+    setPendingSearchQuery('');
     setSearchQuery('');
-    setAppliedSearchQuery('');
     setStatusCodeFilters(new Set());
     setStatusMessageFilters(new Set());
     setDeliveryStatusFilters(new Set());
-    setCurrentPage(1);
+    // Restore default date range (last 30 days)
+    const defaultRange = getDateRange('30days');
+    setStartDate(formatDateInput(defaultRange.start));
+    setEndDate(formatDateInput(defaultRange.end));
+    setActiveDatePreset('30days');
   };
 
-  const hasActiveFilters = appliedSearchQuery || statusCodeFilters.size > 0 || statusMessageFilters.size > 0 || deliveryStatusFilters.size > 0;
+  const hasActiveFilters = searchQuery || statusCodeFilters.size > 0 || statusMessageFilters.size > 0 || deliveryStatusFilters.size > 0;
 
   // Open detail modal for a message
   const openDetailModal = (message: TemplateMessage) => {
@@ -504,20 +451,20 @@ export default function TemplateDetail({
         throw new Error(errorData.error || 'Failed to delete message');
       }
       
-      // Remove from local data
-      if (data) {
-        setData({
-          ...data,
-          messages: data.messages.filter(m => m.id !== selectedMessage.id),
-          total: data.total - 1,
-        });
-      }
-      
+      // Refetch current page
       closeDetailModal();
+      fetchTemplateData(currentPage, true);
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : 'Failed to delete message');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Page navigation
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= (data?.totalPages || 1)) {
+      fetchTemplateData(page);
     }
   };
 
@@ -544,7 +491,7 @@ export default function TemplateDetail({
           <AlertCircle className="w-12 h-12 mx-auto text-[var(--error)] mb-4" />
           <h2 className="text-lg font-medium text-[var(--neutral-900)]">Failed to load template data</h2>
           <p className="mt-1 text-[var(--neutral-600)]">Please try again later.</p>
-          <Button className="mt-4" onClick={() => fetchTemplateData()}>
+          <Button className="mt-4" onClick={() => fetchTemplateData(1)}>
             Retry
           </Button>
         </Card>
@@ -552,7 +499,7 @@ export default function TemplateDetail({
     );
   }
 
-  const { metricStats } = data;
+  const { metricStats, filterOptions, messages, filteredCount, totalPages } = data;
 
   return (
     <div className="p-8">
@@ -572,7 +519,7 @@ export default function TemplateDetail({
         </div>
         <Button 
           variant="secondary" 
-          onClick={() => fetchTemplateData(true)}
+          onClick={() => fetchTemplateData(currentPage, true)}
           disabled={refreshing}
         >
           <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
@@ -588,46 +535,60 @@ export default function TemplateDetail({
             <span>Date Range:</span>
           </div>
           
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => {
-                setStartDate(e.target.value);
-                setActiveDatePreset('');
-              }}
-              className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-            />
-            <span className="text-[var(--neutral-500)]">to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => {
-                setEndDate(e.target.value);
-                setActiveDatePreset('');
-              }}
-              className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-            />
-          </div>
+          {searchQuery ? (
+            // Show "All Time (searching)" indicator when search is active
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-2 text-sm rounded-lg bg-[var(--neutral-100)] text-[var(--neutral-600)] border border-[var(--neutral-200)]">
+                All Time (searching)
+              </span>
+              <span className="text-xs text-[var(--neutral-500)]">
+                Clear search to filter by date
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setActiveDatePreset('');
+                  }}
+                  className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                />
+                <span className="text-[var(--neutral-500)]">to</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setActiveDatePreset('');
+                  }}
+                  className="px-3 py-2 border border-[var(--neutral-200)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                />
+              </div>
 
-          <div className="flex items-center gap-2">
-            {['today', '7days', '30days', 'all'].map((preset) => (
-              <button
-                key={preset}
-                onClick={() => handleDatePreset(preset)}
-                className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
-                  activeDatePreset === preset
-                    ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
-                    : 'bg-white border-[var(--neutral-200)] text-[var(--neutral-700)] hover:border-[var(--neutral-300)]'
-                }`}
-              >
-                {preset === 'today' && 'Today'}
-                {preset === '7days' && 'Last 7 Days'}
-                {preset === '30days' && 'Last 30 Days'}
-                {preset === 'all' && 'All Time'}
-              </button>
-            ))}
-          </div>
+              <div className="flex items-center gap-2">
+                {['today', '7days', '30days', 'all'].map((preset) => (
+                  <button
+                    key={preset}
+                    onClick={() => handleDatePreset(preset)}
+                    className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
+                      activeDatePreset === preset
+                        ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                        : 'bg-white border-[var(--neutral-200)] text-[var(--neutral-700)] hover:border-[var(--neutral-300)]'
+                    }`}
+                  >
+                    {preset === 'today' && 'Today'}
+                    {preset === '7days' && 'Last 7 Days'}
+                    {preset === '30days' && 'Last 30 Days'}
+                    {preset === 'all' && 'All Time'}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </Card>
 
@@ -704,8 +665,8 @@ export default function TemplateDetail({
                 <input
                   type="text"
                   placeholder="Enter search term..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={pendingSearchQuery}
+                  onChange={(e) => setPendingSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       handleSearch();
@@ -757,30 +718,30 @@ export default function TemplateDetail({
                       <input
                         type="checkbox"
                         checked={statusCodeFilters.size === 0}
-                        onChange={() => {
-                          setStatusCodeFilters(new Set());
-                          setCurrentPage(1);
-                        }}
+                        onChange={() => setStatusCodeFilters(new Set())}
                         className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
                       />
                       All
                     </label>
-                    {uniqueStatusCodes.map((item) => (
-                      <label
-                        key={item.key}
-                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
-                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={statusCodeFilters.has(item.key)}
-                          onChange={() => toggleFilter(statusCodeFilters, item.key, setStatusCodeFilters)}
-                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                        />
-                        {item.display}
-                      </label>
-                    ))}
+                    {filterOptions.statusCodes.map((item) => {
+                      const key = getFilterKey(item.value);
+                      return (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                            item.value === null ? 'italic text-[var(--neutral-500)]' : ''
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={statusCodeFilters.has(key)}
+                            onChange={() => toggleFilter(statusCodeFilters, key, setStatusCodeFilters)}
+                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                          />
+                          {formatRawValue(item.value)} ({item.count})
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -808,37 +769,38 @@ export default function TemplateDetail({
                   <ChevronDown className="w-4 h-4" />
                 </button>
                 {showStatusMessageDropdown && (
-                  <div className="absolute z-20 mt-1 w-56 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  <div className="absolute z-20 mt-1 w-64 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg max-h-60 overflow-y-auto">
                     <label
                       className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer border-b border-[var(--neutral-200)] font-medium"
                     >
                       <input
                         type="checkbox"
                         checked={statusMessageFilters.size === 0}
-                        onChange={() => {
-                          setStatusMessageFilters(new Set());
-                          setCurrentPage(1);
-                        }}
+                        onChange={() => setStatusMessageFilters(new Set())}
                         className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
                       />
                       All
                     </label>
-                    {uniqueStatusMessages.map((item) => (
-                      <label
-                        key={item.key}
-                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
-                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={statusMessageFilters.has(item.key)}
-                          onChange={() => toggleFilter(statusMessageFilters, item.key, setStatusMessageFilters)}
-                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                        />
-                        <span className="truncate">{item.display}</span>
-                      </label>
-                    ))}
+                    {filterOptions.statusMessages.map((item) => {
+                      const key = getFilterKey(item.value);
+                      return (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                            item.value === null || item.value === '' ? 'italic text-[var(--neutral-500)]' : ''
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={statusMessageFilters.has(key)}
+                            onChange={() => toggleFilter(statusMessageFilters, key, setStatusMessageFilters)}
+                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                          />
+                          <span className="truncate">{formatRawValue(item.value)}</span>
+                          <span className="text-[var(--neutral-400)] ml-auto">({item.count})</span>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -873,30 +835,30 @@ export default function TemplateDetail({
                       <input
                         type="checkbox"
                         checked={deliveryStatusFilters.size === 0}
-                        onChange={() => {
-                          setDeliveryStatusFilters(new Set());
-                          setCurrentPage(1);
-                        }}
+                        onChange={() => setDeliveryStatusFilters(new Set())}
                         className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
                       />
                       All
                     </label>
-                    {uniqueDeliveryStatuses.map((item) => (
-                      <label
-                        key={item.key}
-                        className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
-                          item.key === '__null__' || item.key === '__empty__' ? 'italic text-[var(--neutral-500)]' : ''
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={deliveryStatusFilters.has(item.key)}
-                          onChange={() => toggleFilter(deliveryStatusFilters, item.key, setDeliveryStatusFilters)}
-                          className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                        />
-                        {item.display}
-                      </label>
-                    ))}
+                    {filterOptions.deliveryStatuses.map((item) => {
+                      const key = getFilterKey(item.value);
+                      return (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--neutral-50)] cursor-pointer ${
+                            item.value === null || item.value === '' ? 'italic text-[var(--neutral-500)]' : ''
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={deliveryStatusFilters.has(key)}
+                            onChange={() => toggleFilter(deliveryStatusFilters, key, setDeliveryStatusFilters)}
+                            className="w-4 h-4 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                          />
+                          {formatRawValue(item.value)} ({item.count})
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -943,7 +905,7 @@ export default function TemplateDetail({
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--neutral-200)]">
-              {paginatedMessages.map((message) => (
+              {messages.map((message) => (
                 <tr 
                   key={message.id} 
                   className="hover:bg-[var(--neutral-50)] cursor-pointer transition-colors"
@@ -998,7 +960,7 @@ export default function TemplateDetail({
         </div>
 
         {/* Empty State */}
-        {paginatedMessages.length === 0 && (
+        {messages.length === 0 && (
           <div className="p-12 text-center">
             <AlertCircle className="w-12 h-12 mx-auto text-[var(--neutral-400)] mb-4" />
             <p className="text-[var(--neutral-600)]">
@@ -1019,11 +981,11 @@ export default function TemplateDetail({
         {totalPages > 1 && (
           <div className="px-6 py-4 border-t border-[var(--neutral-200)] flex items-center justify-between">
             <p className="text-sm text-[var(--neutral-600)]">
-              Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredMessages.length)} of {filteredMessages.length} messages
+              Showing {((currentPage - 1) * 25) + 1} to {Math.min(currentPage * 25, filteredCount)} of {filteredCount} messages
             </p>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                onClick={() => goToPage(currentPage - 1)}
                 disabled={currentPage === 1}
                 className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-50)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -1046,7 +1008,7 @@ export default function TemplateDetail({
                   return (
                     <button
                       key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
+                      onClick={() => goToPage(pageNum)}
                       className={`w-8 h-8 rounded-lg text-sm font-medium ${
                         currentPage === pageNum
                           ? 'bg-[var(--primary)] text-white'
@@ -1060,7 +1022,7 @@ export default function TemplateDetail({
               </div>
 
               <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                onClick={() => goToPage(currentPage + 1)}
                 disabled={currentPage === totalPages}
                 className="p-2 rounded-lg border border-[var(--neutral-200)] hover:bg-[var(--neutral-50)] disabled:opacity-50 disabled:cursor-not-allowed"
               >

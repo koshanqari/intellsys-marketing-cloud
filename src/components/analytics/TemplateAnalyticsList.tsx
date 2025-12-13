@@ -12,19 +12,12 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import type { MetricConfig, DynamicMetricStat } from '@/lib/types';
 
-interface TemplateStatsWithMetrics {
-  template_name: string;
-  total: number;
-  metrics: DynamicMetricStat[];
-}
-
-interface AnalyticsData {
+// Lightweight data structure - only what we need for listing
+interface TemplateListData {
   clientId: string;
   clientName: string;
-  templateStatsWithMetrics: TemplateStatsWithMetrics[];
-  metrics: MetricConfig[];
+  templateNames: string[];
 }
 
 interface TemplateAnalyticsListProps {
@@ -39,16 +32,17 @@ export default function TemplateAnalyticsList({
   clientsPath 
 }: TemplateAnalyticsListProps) {
   const router = useRouter();
-  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [data, setData] = useState<TemplateListData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchAnalytics = useCallback(async (showRefresh = false) => {
+  const fetchTemplates = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     
     try {
-      const response = await fetch('/api/analytics');
+      // Use lightweight endpoint - only fetches template names
+      const response = await fetch('/api/analytics/templates');
       
       if (!response.ok) {
         if (response.status === 401) {
@@ -59,13 +53,13 @@ export default function TemplateAnalyticsList({
           router.push(clientsPath);
           return;
         }
-        throw new Error('Failed to fetch analytics');
+        throw new Error('Failed to fetch templates');
       }
       
-      const analyticsData = await response.json();
-      setData(analyticsData);
+      const templateData = await response.json();
+      setData(templateData);
     } catch (error) {
-      console.error('Error fetching analytics:', error);
+      console.error('Error fetching templates:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -73,11 +67,11 @@ export default function TemplateAnalyticsList({
   }, [router, loginPath, clientsPath]);
 
   useEffect(() => {
-    fetchAnalytics();
-  }, [fetchAnalytics]);
+    fetchTemplates();
+  }, [fetchTemplates]);
 
-  const filteredTemplates = data?.templateStatsWithMetrics.filter(template =>
-    template.template_name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredTemplates = data?.templateNames.filter(name =>
+    name.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
   const handleTemplateClick = (templateName: string) => {
@@ -105,9 +99,9 @@ export default function TemplateAnalyticsList({
       <div className="p-8 flex items-center justify-center min-h-[60vh]">
         <Card className="text-center py-12 max-w-md">
           <AlertCircle className="w-12 h-12 mx-auto text-[var(--error)] mb-4" />
-          <h2 className="text-lg font-medium text-[var(--neutral-900)]">Failed to load analytics</h2>
+          <h2 className="text-lg font-medium text-[var(--neutral-900)]">Failed to load templates</h2>
           <p className="mt-1 text-[var(--neutral-600)]">Please try again later.</p>
-          <Button className="mt-4" onClick={() => fetchAnalytics()}>
+          <Button className="mt-4" onClick={() => fetchTemplates()}>
             Retry
           </Button>
         </Card>
@@ -127,7 +121,7 @@ export default function TemplateAnalyticsList({
         </div>
         <Button 
           variant="secondary" 
-          onClick={() => fetchAnalytics(true)}
+          onClick={() => fetchTemplates(true)}
           disabled={refreshing}
         >
           <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
@@ -162,41 +156,38 @@ export default function TemplateAnalyticsList({
             </p>
           </Card>
         ) : (
-          filteredTemplates.map((template) => {
-            return (
-              <Card
-                key={template.template_name}
-                className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
-                onClick={() => handleTemplateClick(template.template_name)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
-                        {template.template_name}
-                      </h3>
-                    </div>
+          filteredTemplates.map((templateName) => (
+            <Card
+              key={templateName}
+              className="cursor-pointer hover:border-[var(--primary)] hover:shadow-[var(--shadow-md)] transition-all group"
+              onClick={() => handleTemplateClick(templateName)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-lg bg-[var(--primary-light)] text-[var(--primary)]">
+                    <FileText className="w-5 h-5" />
                   </div>
-                  <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
-                    <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
+                  <div>
+                    <h3 className="text-base font-semibold text-[var(--neutral-900)] group-hover:text-[var(--primary)] transition-colors">
+                      {templateName}
+                    </h3>
                   </div>
                 </div>
-              </Card>
-            );
-          })
+                <div className="p-2 rounded-lg bg-[var(--neutral-100)] group-hover:bg-[var(--primary-light)] transition-colors">
+                  <ArrowRight className="w-5 h-5 text-[var(--neutral-400)] group-hover:text-[var(--primary)] transition-colors" />
+                </div>
+              </div>
+            </Card>
+          ))
         )}
       </div>
 
       {/* Summary */}
       {filteredTemplates.length > 0 && (
         <p className="mt-4 text-sm text-[var(--neutral-400)]">
-          Showing {filteredTemplates.length} of {data.templateStatsWithMetrics.length} templates
+          Showing {filteredTemplates.length} of {data.templateNames.length} templates
         </p>
       )}
     </div>
   );
 }
-

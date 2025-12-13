@@ -1,31 +1,26 @@
 import { query, queryOne } from './db';
 import type { Client, TemplateStats, DailyStats, StatusDistribution, AnalyticsSummary } from './types';
 
-// Client queries
+// Client queries - Lightweight query for listing (no message counts)
 export async function getClientsFromTable(): Promise<Client[]> {
   return query<Client>(`
     SELECT 
-      c.id,
-      c.name,
-      c.email,
-      c.phone,
-      c.industry,
-      c.logo_url,
-      c.whatsapp_enabled,
-      c.sms_enabled,
-      c.email_enabled,
-      c.status,
-      c.created_at,
-      c.updated_at,
-      COALESCE(m.total_messages, 0)::int as total_messages
-    FROM app.clients c
-    LEFT JOIN (
-      SELECT client_id, COUNT(*) as total_messages
-      FROM app.message_logs
-      GROUP BY client_id
-    ) m ON c.id = m.client_id
-    WHERE c.status = 'active'
-    ORDER BY c.name ASC
+      id,
+      name,
+      email,
+      phone,
+      industry,
+      logo_url,
+      whatsapp_enabled,
+      sms_enabled,
+      email_enabled,
+      status,
+      created_at,
+      updated_at,
+      0 as total_messages
+    FROM app.clients
+    WHERE status = 'active'
+    ORDER BY name ASC
   `);
 }
 
