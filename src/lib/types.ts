@@ -62,6 +62,8 @@ export interface ClientUserPermissions {
   journey_builder?: boolean;
   journey_builder_edit?: boolean;
   analytics: boolean;
+  analytics_edit?: boolean;
+  analytics_delete?: boolean;
   templates?: boolean;
   campaigns?: boolean;
   reports?: boolean;
@@ -90,16 +92,16 @@ export interface MetricConfig {
   id: string;
   client_id: string;
   name: string;
-  icon: string; // lucide icon name e.g., 'Send', 'CheckCircle2', 'Eye'
-  color: string; // hex color e.g., '#0D7C3D'
-  map_to_column: MetricMapColumn | null; // null for calculated metrics
-  keywords: string[] | null; // null for calculated metrics
+  icon: string;
+  color: string;
+  map_to_column: MetricMapColumn | null;
+  keywords: string[] | null;
   sort_order: number;
   is_active: boolean;
   is_calculated: boolean;
-  formula: string | null; // Formula for calculated metrics (e.g., "(delivered/sent)*100" or "Math.round((delivered/sent)*100)")
-  prefix: string | null; // Prefix to display before calculated metric value (e.g., "Rs", "$", "USD")
-  unit: string | null; // Unit/suffix to display after calculated metric value (e.g., "%", "Rs", "$")
+  formula: string | null;
+  prefix: string | null;
+  unit: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -130,38 +132,13 @@ export interface DynamicMetricStat {
   unit?: string | null;
 }
 
-// Journey Builder Types
-export interface JourneyNodePosition {
-  x: number;
-  y: number;
-}
-
-export interface JourneyNodeSize {
-  width: number;
-  height: number;
-}
-
-export interface JourneyNode {
-  id: string;
-  type: 'whatsapp' | 'event' | 'logic' | 'sticky' | 'table';
-  position: JourneyNodePosition;
-  size?: JourneyNodeSize;
-  outputs: string[];
-  data: Record<string, unknown>;
-}
-
-export interface JourneyConnection {
-  id: string;
-  sourceId: string;
-  targetId: string;
-}
-
+// Journey Types
 export interface Journey {
   id: string;
   name: string;
   description: string | null;
-  nodes: JourneyNode[];
-  connections: JourneyConnection[];
+  nodes: unknown[];
+  connections: unknown[];
   canvas_state: { zoom: number; panX: number; panY: number } | null;
   status: string;
   created_at: string;

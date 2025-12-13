@@ -305,7 +305,7 @@ export default function MetricsConfigPanel() {
         .map(k => k.toLowerCase())
         .filter(k => k.length > 0);
 
-      const body: any = {
+      const body: Record<string, unknown> = {
         name: formData.name.trim(),
         icon: formData.icon,
         color: formData.color,
@@ -744,7 +744,7 @@ export default function MetricsConfigPanel() {
                   placeholder="e.g., Rs, $, USD"
                 />
                 <p className="mt-1 text-xs text-[var(--neutral-500)]">
-                  Text to display before the calculated value (e.g., "Rs" for currency, "$" for dollars)
+                  Text to display before the calculated value (e.g., &quot;Rs&quot; for currency, &quot;$&quot; for dollars)
                 </p>
               </div>
               <div>
@@ -759,7 +759,7 @@ export default function MetricsConfigPanel() {
                   placeholder="e.g., %, Rs, $, per message"
                 />
                 <p className="mt-1 text-xs text-[var(--neutral-500)]">
-                  Text to display after the calculated value (e.g., "%" for percentages, "Rs" for currency)
+                  Text to display after the calculated value (e.g., &quot;%&quot; for percentages, &quot;Rs&quot; for currency)
                 </p>
               </div>
             </>
@@ -865,4 +865,5 @@ export default function MetricsConfigPanel() {
     </>
   );
 }
+
 

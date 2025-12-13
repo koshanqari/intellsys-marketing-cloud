@@ -81,6 +81,8 @@ export default function ClientSettingsPage() {
       journey_builder: false,
       journey_builder_edit: false,
       analytics: true,
+      analytics_edit: false,
+      analytics_delete: false,
       templates: false,
       campaigns: false,
       reports: false,
@@ -101,6 +103,8 @@ export default function ClientSettingsPage() {
       journey_builder: false,
       journey_builder_edit: false,
       analytics: true,
+      analytics_edit: false,
+      analytics_delete: false,
       templates: false,
       campaigns: false,
       reports: false,
@@ -292,7 +296,9 @@ export default function ClientSettingsPage() {
         permissions: { 
           journey_builder: false,
           journey_builder_edit: false,
-          analytics: true, 
+          analytics: true,
+          analytics_edit: false,
+          analytics_delete: false,
           templates: false, 
           campaigns: false, 
           reports: false, 
@@ -319,6 +325,8 @@ export default function ClientSettingsPage() {
           journey_builder: user.permissions.journey_builder ?? false,
           journey_builder_edit: user.permissions.journey_builder_edit ?? false,
           analytics: user.permissions.analytics ?? false,
+          analytics_edit: user.permissions.analytics_edit ?? false,
+          analytics_delete: user.permissions.analytics_delete ?? false,
           templates: user.permissions.templates ?? false,
           campaigns: user.permissions.campaigns ?? false,
           reports: user.permissions.reports ?? false,
@@ -544,7 +552,10 @@ export default function ClientSettingsPage() {
                           )}
                           {user.permissions.analytics && (
                             <span className="text-xs px-2 py-1 rounded bg-[var(--primary-light)] text-[var(--primary)]">
-                              Analytics
+                              Analytics{(user.permissions.analytics_edit || user.permissions.analytics_delete) && ` (${[
+                                user.permissions.analytics_edit && 'Edit',
+                                user.permissions.analytics_delete && 'Delete'
+                              ].filter(Boolean).join(', ')})`}
                             </span>
                           )}
                           {user.permissions.templates && (
@@ -826,12 +837,45 @@ export default function ClientSettingsPage() {
                   checked={newUser.permissions.analytics}
                   onChange={(e) => setNewUser({
                     ...newUser,
-                    permissions: { ...newUser.permissions, analytics: e.target.checked }
+                    permissions: { 
+                      ...newUser.permissions, 
+                      analytics: e.target.checked,
+                      analytics_edit: e.target.checked ? newUser.permissions.analytics_edit : false,
+                      analytics_delete: e.target.checked ? newUser.permissions.analytics_delete : false
+                    }
                   })}
                   className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
                 />
                 <span className="text-sm text-[var(--neutral-700)]">Template Analytics</span>
               </label>
+              {newUser.permissions.analytics && (
+                <>
+                  <label className="flex items-center gap-3 cursor-pointer ml-8">
+                    <input
+                      type="checkbox"
+                      checked={newUser.permissions.analytics_edit}
+                      onChange={(e) => setNewUser({
+                        ...newUser,
+                        permissions: { ...newUser.permissions, analytics_edit: e.target.checked }
+                      })}
+                      className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                    <span className="text-sm text-[var(--neutral-700)]">Can Edit Message Logs</span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer ml-8">
+                    <input
+                      type="checkbox"
+                      checked={newUser.permissions.analytics_delete}
+                      onChange={(e) => setNewUser({
+                        ...newUser,
+                        permissions: { ...newUser.permissions, analytics_delete: e.target.checked }
+                      })}
+                      className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                    <span className="text-sm text-[var(--neutral-700)]">Can Delete Message Logs</span>
+                  </label>
+                </>
+              )}
               
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -1024,12 +1068,45 @@ export default function ClientSettingsPage() {
                   checked={editUserData.permissions.analytics}
                   onChange={(e) => setEditUserData({
                     ...editUserData,
-                    permissions: { ...editUserData.permissions, analytics: e.target.checked }
+                    permissions: { 
+                      ...editUserData.permissions, 
+                      analytics: e.target.checked,
+                      analytics_edit: e.target.checked ? editUserData.permissions.analytics_edit : false,
+                      analytics_delete: e.target.checked ? editUserData.permissions.analytics_delete : false
+                    }
                   })}
                   className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
                 />
                 <span className="text-sm text-[var(--neutral-700)]">Template Analytics</span>
               </label>
+              {editUserData.permissions.analytics && (
+                <>
+                  <label className="flex items-center gap-3 cursor-pointer ml-8">
+                    <input
+                      type="checkbox"
+                      checked={editUserData.permissions.analytics_edit}
+                      onChange={(e) => setEditUserData({
+                        ...editUserData,
+                        permissions: { ...editUserData.permissions, analytics_edit: e.target.checked }
+                      })}
+                      className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                    <span className="text-sm text-[var(--neutral-700)]">Can Edit Message Logs</span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer ml-8">
+                    <input
+                      type="checkbox"
+                      checked={editUserData.permissions.analytics_delete}
+                      onChange={(e) => setEditUserData({
+                        ...editUserData,
+                        permissions: { ...editUserData.permissions, analytics_delete: e.target.checked }
+                      })}
+                      className="w-5 h-5 rounded border-[var(--neutral-300)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                    <span className="text-sm text-[var(--neutral-700)]">Can Delete Message Logs</span>
+                  </label>
+                </>
+              )}
               
               <label className="flex items-center gap-3 cursor-pointer">
                 <input

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { Lock, User } from 'lucide-react';
 import Button from '@/components/ui/Button';
@@ -9,7 +8,6 @@ import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');

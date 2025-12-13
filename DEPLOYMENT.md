@@ -73,3 +73,4 @@ Set these in your Vercel project settings:
 - The application supports both super admin and client user authentication
 - Client users are automatically redirected to their dashboard after login
 - All API routes now support both admin and client user sessions
+

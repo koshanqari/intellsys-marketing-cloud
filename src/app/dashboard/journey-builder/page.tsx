@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { 
   Plus, 
   ZoomIn, 
@@ -13,7 +14,6 @@ import {
   ArrowLeft,
   Trash2,
   FileText,
-  Clock,
   MessageSquare,
   Zap,
   GitBranch,
@@ -26,7 +26,9 @@ import {
   WrapText,
   ExternalLink,
   Focus,
-  AlertCircle
+  AlertCircle,
+  Pencil,
+  Link2
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -39,7 +41,7 @@ interface Position {
   y: number;
 }
 
-type NodeType = 'whatsapp' | 'event' | 'logic' | 'sticky' | 'table';
+type NodeType = 'whatsapp' | 'event' | 'logic' | 'sticky' | 'table' | 'journey';
 
 interface Size {
   width: number;
@@ -96,7 +98,16 @@ interface TableNode extends BaseNode {
   };
 }
 
-type JourneyNode = WhatsAppNode | EventNode | LogicNode | StickyNode | TableNode;
+interface JourneyLinkNode extends BaseNode {
+  type: 'journey';
+  data: {
+    targetJourneyId: string | null;
+    targetJourneyName: string | null;
+    description: string;
+  };
+}
+
+type JourneyNode = WhatsAppNode | EventNode | LogicNode | StickyNode | TableNode | JourneyLinkNode;
 
 interface Connection {
   id: string;
@@ -154,7 +165,7 @@ const VariableTextarea = ({
   style?: React.CSSProperties;
 }) => {
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full overflow-hidden">
       {/* Highlight overlay - shows the formatted text with variables highlighted */}
       <div 
         className={`absolute inset-0 pointer-events-none whitespace-pre-wrap break-words overflow-hidden ${className}`}
@@ -175,7 +186,7 @@ const VariableTextarea = ({
         onChange={onChange}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
-        className={`relative w-full h-full bg-transparent resize-none focus:outline-none ${className}`}
+        className={`relative w-full h-full bg-transparent resize-none focus:outline-none overflow-hidden ${className}`}
         style={{ 
           ...style, 
           color: 'transparent',
@@ -273,17 +284,25 @@ const NODE_STYLES = {
     icon: Table2,
     label: 'Table',
   },
+  journey: {
+    bg: '#F97316',
+    bgLight: '#FFEDD5',
+    border: '#EA580C',
+    icon: Link2,
+    label: 'Journey Link',
+  },
 };
 
 const STICKY_COLORS = ['#FEF08A', '#FECACA', '#BBF7D0', '#BFDBFE', '#E9D5FF', '#FED7AA'];
 
 // Default node sizes
 const DEFAULT_SIZES: Record<string, Size> = {
-  whatsapp: { width: 280, height: 180 },
+  whatsapp: { width: 280, height: 220 },
   event: { width: 240, height: 120 },
   logic: { width: 260, height: 120 },
   sticky: { width: 200, height: 150 },
   table: { width: 350, height: 200 },
+  journey: { width: 280, height: 220 },
 };
 
 // Minimum node sizes
@@ -293,19 +312,31 @@ const MIN_SIZES: Record<string, Size> = {
   logic: { width: 200, height: 100 },
   sticky: { width: 150, height: 100 },
   table: { width: 250, height: 150 },
+  journey: { width: 240, height: 150 },
 };
 
 export default function JourneyBuilderPage() {
+  const searchParams = useSearchParams();
+  const journeyIdFromUrl = searchParams.get('journey');
+  
   // Journey list state
   const [journeys, setJourneys] = useState<Journey[]>([]);
   const [loadingJourneys, setLoadingJourneys] = useState(true);
   const [currentJourney, setCurrentJourney] = useState<Journey | null>(null);
+  const [autoLoadedJourneyId, setAutoLoadedJourneyId] = useState<string | null>(null);
   
   // Create journey modal
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newJourneyName, setNewJourneyName] = useState('');
   const [newJourneyDescription, setNewJourneyDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  
+  // Edit journey modal
+  const [showEditJourneyModal, setShowEditJourneyModal] = useState(false);
+  const [editingJourney, setEditingJourney] = useState<Journey | null>(null);
+  const [editJourneyName, setEditJourneyName] = useState('');
+  const [editJourneyDescription, setEditJourneyDescription] = useState('');
+  const [updatingJourney, setUpdatingJourney] = useState(false);
   
   // Add node dropdown
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -345,6 +376,9 @@ export default function JourneyBuilderPage() {
   const [templates, setTemplates] = useState<string[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState<string | null>(null);
+  
+  // Journey dropdown state (for journey link nodes)
+  const [showJourneyDropdown, setShowJourneyDropdown] = useState<string | null>(null);
 
   // Permissions state
   const [canEdit, setCanEdit] = useState(true); // Default to true for super admin
@@ -398,6 +432,17 @@ export default function JourneyBuilderPage() {
     fetchTemplates();
   }, []);
 
+  // Auto-load journey from URL query parameter
+  useEffect(() => {
+    if (journeyIdFromUrl && journeys.length > 0 && !currentJourney && autoLoadedJourneyId !== journeyIdFromUrl) {
+      const journey = journeys.find(j => j.id === journeyIdFromUrl);
+      if (journey) {
+        setAutoLoadedJourneyId(journeyIdFromUrl);
+        loadJourney(journey);
+      }
+    }
+  }, [journeyIdFromUrl, journeys, currentJourney, autoLoadedJourneyId]);
+
   // Close add menu and template dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -409,10 +454,14 @@ export default function JourneyBuilderPage() {
       if (showTemplateDropdown && !target.closest('.template-dropdown-container')) {
         setShowTemplateDropdown(null);
       }
+      // Close journey dropdown if clicking outside
+      if (showJourneyDropdown && !target.closest('.journey-dropdown-container')) {
+        setShowJourneyDropdown(null);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTemplateDropdown]);
+  }, [showTemplateDropdown, showJourneyDropdown]);
 
   // Auto-save removed - user must click Save button manually
 
@@ -526,6 +575,45 @@ export default function JourneyBuilderPage() {
     }
   };
 
+  const openEditJourneyModal = (journey: Journey, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingJourney(journey);
+    setEditJourneyName(journey.name);
+    setEditJourneyDescription(journey.description || '');
+    setShowEditJourneyModal(true);
+  };
+
+  const updateJourneyDetails = async () => {
+    if (!editingJourney || !editJourneyName.trim()) return;
+    
+    setUpdatingJourney(true);
+    try {
+      const response = await fetch(`/api/journeys/${editingJourney.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editJourneyName,
+          description: editJourneyDescription || null,
+        }),
+      });
+      
+      if (response.ok) {
+        await response.json(); // Consume response
+        setJourneys(journeys.map(j => j.id === editingJourney.id ? { ...j, name: editJourneyName, description: editJourneyDescription || null } : j));
+        // Update currentJourney if it's the one being edited
+        if (currentJourney?.id === editingJourney.id) {
+          setCurrentJourney({ ...currentJourney, name: editJourneyName, description: editJourneyDescription || null });
+        }
+        setShowEditJourneyModal(false);
+        setEditingJourney(null);
+      }
+    } catch (error) {
+      console.error('Failed to update journey:', error);
+    } finally {
+      setUpdatingJourney(false);
+    }
+  };
+
   // Add nodes
   const addNode = (type: NodeType) => {
     if (!canEdit) {
@@ -587,6 +675,19 @@ export default function JourneyBuilderPage() {
               ['', '', ''],
               ['', '', ''],
             ]
+          },
+          outputs: [],
+        };
+        break;
+      case 'journey':
+        newNode = {
+          id: generateId(),
+          type: 'journey',
+          position: basePosition,
+          data: { 
+            targetJourneyId: null,
+            targetJourneyName: null,
+            description: 'Link to another journey...'
           },
           outputs: [],
         };
@@ -1585,40 +1686,40 @@ export default function JourneyBuilderPage() {
           </div>
           {/* Template selector */}
           <div className="px-3 py-2 border-b border-[var(--neutral-200)] bg-white relative template-dropdown-container">
-            <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowTemplateDropdown(showTemplateDropdown === node.id ? null : node.id);
+                if (!templates.length && !loadingTemplates) {
+                  fetchTemplates();
+                }
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 text-sm border border-[var(--neutral-300)] rounded-lg hover:border-[var(--primary)] transition-colors bg-white"
+            >
+              <span className={waNode.data.templateName ? 'text-[var(--neutral-900)]' : 'text-[var(--neutral-400)]'}>
+                {waNode.data.templateName || 'Select Template'}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-[var(--neutral-400)] transition-transform ${showTemplateDropdown === node.id ? 'rotate-180' : ''}`} />
+            </button>
+            {/* CTA Button - View Analytics */}
+            {waNode.data.templateName && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setShowTemplateDropdown(showTemplateDropdown === node.id ? null : node.id);
-                  if (!templates.length && !loadingTemplates) {
-                    fetchTemplates();
-                  }
+                  e.preventDefault();
+                  window.open(`/dashboard/analytics/${encodeURIComponent(waNode.data.templateName || '')}`, '_blank');
                 }}
-                className="flex-1 flex items-center justify-between px-2 py-1.5 text-xs border border-[var(--neutral-300)] rounded hover:border-[var(--primary)] transition-colors bg-white"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+                className="w-full mt-2 px-3 py-2 text-sm font-medium rounded-lg bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)] transition-colors flex items-center justify-center gap-2"
+                title="View Template Analytics (opens in new tab)"
               >
-                <span className={waNode.data.templateName ? 'text-[var(--neutral-900)]' : 'text-[var(--neutral-400)]'}>
-                  {waNode.data.templateName || 'Select Template'}
-                </span>
-                <ChevronDown className={`w-3 h-3 text-[var(--neutral-400)] transition-transform ${showTemplateDropdown === node.id ? 'rotate-180' : ''}`} />
+                <ExternalLink className="w-4 h-4" />
+                View Analytics
               </button>
-              {waNode.data.templateName && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    window.open(`/dashboard/analytics/${encodeURIComponent(waNode.data.templateName || '')}`, '_blank');
-                  }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  className="px-2 py-1.5 text-xs font-medium rounded bg-[var(--primary-light)] text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors flex items-center gap-1"
-                  title="View Template Analytics (opens in new tab)"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+            )}
             {/* Template dropdown */}
             {showTemplateDropdown === node.id && (
               <div className="absolute top-full left-3 right-3 mt-1 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
@@ -1652,9 +1753,9 @@ export default function JourneyBuilderPage() {
             )}
           </div>
           {/* WhatsApp message bubble */}
-          <div className="p-3" style={{ height: nodeSize.height - 110 }}>
+          <div className="p-3" style={{ height: nodeSize.height - (waNode.data.templateName ? 145 : 100) }}>
             <div className="bg-[#DCF8C6] rounded-lg rounded-tl-none p-3 shadow-sm h-full flex flex-col">
-              <div className="flex-1">
+              <div className="flex-1 min-h-0">
                 <VariableTextarea
                   value={waNode.data.message}
                   onChange={(e) => updateNodeData(node.id, { message: e.target.value })}
@@ -1662,7 +1763,7 @@ export default function JourneyBuilderPage() {
                   placeholder="Type your message..."
                 />
               </div>
-              <div className="flex items-center justify-end gap-1 text-xs text-[#667781] mt-1">
+              <div className="flex items-center justify-end gap-1 text-xs text-[#667781] mt-1 flex-shrink-0">
                 <span>12:00</span>
                 <svg className="w-4 h-4 text-[#53BDEB]" viewBox="0 0 16 15" fill="currentColor">
                   <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.88a.32.32 0 0 1-.484.032l-.358-.325a.32.32 0 0 0-.484.032l-.378.48a.418.418 0 0 0 .036.54l1.32 1.267a.32.32 0 0 0 .484-.034l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.032L1.892 7.77a.366.366 0 0 0-.516.005l-.423.433a.364.364 0 0 0 .006.514l3.255 3.185a.32.32 0 0 0 .484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z"/>
@@ -1855,6 +1956,160 @@ export default function JourneyBuilderPage() {
       );
     }
 
+    // Journey Link node
+    if (nodeType === 'journey') {
+      const journeyLinkNode = node as JourneyLinkNode;
+      // Filter out current journey from the list
+      const availableJourneys = journeys.filter(j => j.id !== currentJourney?.id);
+      
+      return (
+        <div
+          key={node.id}
+          className={`absolute rounded-lg border-2 bg-white shadow-lg transition-shadow pointer-events-auto ${
+            isSelected ? 'shadow-xl' : ''
+          }`}
+          style={{
+            left: node.position.x,
+            top: node.position.y,
+            width: nodeSize.width,
+            height: nodeSize.height,
+            borderColor: isSelected ? style.bg : '#E5E7EB',
+            cursor: isDragging ? 'grabbing' : 'grab',
+          }}
+          onMouseDown={(e) => handleNodeDragStart(e, node.id)}
+        >
+          {/* Header */}
+          <div 
+            className="flex items-center justify-between px-3 py-2 rounded-t-md border-b"
+            style={{ backgroundColor: style.bgLight, borderColor: '#E5E7EB' }}
+          >
+            <div className="flex items-center gap-2">
+              <GripVertical className="w-4 h-4 text-[var(--neutral-400)] node-handle" />
+              <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: style.bg }}>
+                <Link2 className="w-3.5 h-3.5 text-white" />
+              </div>
+              <span className="text-sm font-medium text-[var(--neutral-900)]">{style.label}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); duplicateNode(node.id); }}
+                className="p-1 rounded hover:bg-[var(--neutral-200)] text-[var(--neutral-400)] hover:text-[var(--neutral-600)] transition-colors"
+                title="Duplicate"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); deleteNode(node.id); }}
+                className="p-1 rounded hover:bg-[var(--error-light)] text-[var(--neutral-400)] hover:text-[var(--error)] transition-colors"
+                title="Delete"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          {/* Journey selector */}
+          <div className="px-3 py-2 border-b border-[var(--neutral-200)] bg-white relative journey-dropdown-container">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowJourneyDropdown(showJourneyDropdown === node.id ? null : node.id);
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 text-sm border border-[var(--neutral-300)] rounded-lg hover:border-[var(--primary)] transition-colors bg-white"
+            >
+              <span className={journeyLinkNode.data.targetJourneyName ? 'text-[var(--neutral-900)]' : 'text-[var(--neutral-400)]'}>
+                {journeyLinkNode.data.targetJourneyName || 'Select Journey'}
+              </span>
+              <ChevronDown className={`w-4 h-4 text-[var(--neutral-400)] transition-transform ${showJourneyDropdown === node.id ? 'rotate-180' : ''}`} />
+            </button>
+            {/* CTA Button - Open Journey */}
+            {journeyLinkNode.data.targetJourneyId && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  window.open(`/dashboard/journey-builder?journey=${journeyLinkNode.data.targetJourneyId}`, '_blank');
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+                className="w-full mt-2 px-3 py-2 text-sm font-medium rounded-lg bg-[#F97316] text-white hover:bg-[#EA580C] transition-colors flex items-center justify-center gap-2"
+                title="Open Journey (opens in new tab)"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open Journey
+              </button>
+            )}
+            {/* Journey dropdown */}
+            {showJourneyDropdown === node.id && (
+              <div className="absolute top-full left-3 right-3 mt-1 bg-white border border-[var(--neutral-200)] rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                {loadingJourneys ? (
+                  <div className="px-3 py-2 text-xs text-[var(--neutral-500)] flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Loading journeys...
+                  </div>
+                ) : availableJourneys.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-[var(--neutral-500)]">
+                    No other journeys available
+                  </div>
+                ) : (
+                  availableJourneys.map((journey) => (
+                    <button
+                      key={journey.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        updateNodeData(node.id, { 
+                          targetJourneyId: journey.id,
+                          targetJourneyName: journey.name 
+                        });
+                        setShowJourneyDropdown(null);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-[var(--neutral-50)] transition-colors ${
+                        journeyLinkNode.data.targetJourneyId === journey.id ? 'bg-[var(--primary-light)] text-[var(--primary)]' : 'text-[var(--neutral-700)]'
+                      }`}
+                    >
+                      <div className="font-medium">{journey.name}</div>
+                      {journey.description && (
+                        <div className="text-[var(--neutral-500)] truncate">{journey.description}</div>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          {/* Description */}
+          <div className="p-3 overflow-hidden" style={{ height: nodeSize.height - (journeyLinkNode.data.targetJourneyId ? 145 : 100) }}>
+            <div className="w-full h-full px-3 py-2 border border-[var(--neutral-200)] rounded-lg focus-within:ring-2 focus-within:ring-[var(--primary)] focus-within:border-transparent overflow-hidden">
+              <VariableTextarea
+                value={journeyLinkNode.data.description}
+                onChange={(e) => updateNodeData(node.id, { description: e.target.value })}
+                className="text-sm text-[var(--neutral-700)]"
+                placeholder="Add description..."
+              />
+            </div>
+          </div>
+          {/* Connection points */}
+          <div
+            className="node-input absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 cursor-crosshair hover:scale-125 transition-transform"
+            style={{ borderColor: style.bg }}
+            onMouseUp={(e) => handleConnectionEnd(e, node.id, node.type)}
+          />
+          <div
+            className="node-output absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white cursor-crosshair hover:scale-125 transition-transform"
+            style={{ backgroundColor: style.bg }}
+            onMouseDown={(e) => handleConnectionStart(e, node.id, node.type)}
+          />
+          {/* Resize handle */}
+          <div
+            className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize rounded-br-md"
+            style={{ backgroundColor: 'rgba(0,0,0,0.1)' }}
+            onMouseDown={(e) => handleResizeStart(e, node.id, 'se')}
+          />
+        </div>
+      );
+    }
+
     // Fallback for any unknown node types - render as logic node
     return null;
   };
@@ -1910,23 +2165,27 @@ export default function JourneyBuilderPage() {
                         {journey.description}
                       </p>
                     )}
-                    <div className="flex items-center gap-2 mt-3 text-xs text-[var(--neutral-400)]">
-                      <Clock className="w-3 h-3" />
-                      <span>
-                        Updated {new Date(journey.updated_at).toLocaleDateString()}
-                      </span>
-                    </div>
                   </div>
                   {canEdit && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteJourney(journey.id);
-                      }}
-                      className="p-2 rounded-lg hover:bg-[var(--error-light)] text-[var(--neutral-400)] hover:text-[var(--error)] transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => openEditJourneyModal(journey, e)}
+                        className="p-2 rounded-lg hover:bg-[var(--neutral-100)] text-[var(--neutral-400)] hover:text-[var(--neutral-600)] transition-colors"
+                        title="Edit Journey"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteJourney(journey.id);
+                        }}
+                        className="p-2 rounded-lg hover:bg-[var(--error-light)] text-[var(--neutral-400)] hover:text-[var(--error)] transition-colors"
+                        title="Delete Journey"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
                 </div>
               </Card>
@@ -1966,6 +2225,49 @@ export default function JourneyBuilderPage() {
               </Button>
               <Button onClick={createJourney} loading={creating} disabled={!newJourneyName.trim()}>
                 Create Journey
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Edit Journey Modal */}
+        <Modal
+          isOpen={showEditJourneyModal}
+          onClose={() => {
+            setShowEditJourneyModal(false);
+            setEditingJourney(null);
+          }}
+          title="Edit Journey"
+        >
+          <div className="space-y-4">
+            <Input
+              label="Journey Name"
+              value={editJourneyName}
+              onChange={(e) => setEditJourneyName(e.target.value)}
+              placeholder="e.g., Welcome Flow"
+              required
+            />
+            <div>
+              <label className="block text-sm font-medium text-[var(--neutral-700)] mb-1">
+                Description (optional)
+              </label>
+              <textarea
+                value={editJourneyDescription}
+                onChange={(e) => setEditJourneyDescription(e.target.value)}
+                placeholder="Describe what this journey does..."
+                className="w-full px-4 py-2 border border-[var(--neutral-200)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => {
+                setShowEditJourneyModal(false);
+                setEditingJourney(null);
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={updateJourneyDetails} loading={updatingJourney} disabled={!editJourneyName.trim()}>
+                Save Changes
               </Button>
             </div>
           </div>
@@ -2118,6 +2420,18 @@ export default function JourneyBuilderPage() {
                   <div className="text-left">
                     <p className="text-sm font-medium text-[var(--neutral-900)]">Table</p>
                     <p className="text-xs text-[var(--neutral-500)]">Add data tables</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => addNode('journey')}
+                  className="flex items-center gap-3 w-full px-4 py-2 hover:bg-[var(--neutral-50)] transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: NODE_STYLES.journey.bgLight }}>
+                    <Link2 className="w-4 h-4" style={{ color: NODE_STYLES.journey.border }} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-[var(--neutral-900)]">Journey Link</p>
+                    <p className="text-xs text-[var(--neutral-500)]">Link to another journey</p>
                   </div>
                 </button>
                 <div className="border-t border-[var(--neutral-200)] my-2" />

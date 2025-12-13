@@ -70,3 +70,4 @@ COMMENT ON COLUMN app.client_metrics.map_to_column IS 'Which column to query: me
 COMMENT ON COLUMN app.client_metrics.keywords IS 'Array of values to match and aggregate for this metric';
 COMMENT ON COLUMN app.client_metrics.sort_order IS 'Display order in the dashboard (lower = first)';
 
+

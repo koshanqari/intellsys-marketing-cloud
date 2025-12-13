@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
 import Card from '@/components/ui/Card';
@@ -14,11 +14,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [clientName, setClientName] = useState<string>('');
 
-  useEffect(() => {
-    checkAccess();
-  }, []);
-
-  const checkAccess = async () => {
+  const checkAccess = useCallback(async () => {
     try {
       // Check if user is super admin or client user with settings permission
       const sessionResponse = await fetch('/api/auth/session');
@@ -50,7 +46,11 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    checkAccess();
+  }, [checkAccess]);
 
   // Check RBAC - only show if user has settings permission or is super admin
   const canViewSettings = isSuperAdmin || userPermissions?.settings === true;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { MessageSquare, LogOut, ArrowRight, Plus, Mail, Phone, Building } from 'lucide-react';
@@ -35,11 +35,7 @@ export default function ClientsPage() {
     industry: '',
   });
 
-  useEffect(() => {
-    fetchClients();
-  }, []);
-
-  const fetchClients = async () => {
+  const fetchClients = useCallback(async () => {
     try {
       const response = await fetch('/api/clients');
       if (!response.ok) {
@@ -56,7 +52,11 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
 
   const selectClient = async (clientId: string) => {
     setSelecting(clientId);

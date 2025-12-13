@@ -29,3 +29,4 @@ COMMENT ON COLUMN app.client_metrics.formula IS 'Formula for calculated metrics 
 COMMENT ON COLUMN app.client_metrics.prefix IS 'Prefix to display before calculated metric value (e.g., Rs, $, USD)';
 COMMENT ON COLUMN app.client_metrics.unit IS 'Unit/suffix to display after calculated metric value (e.g., %, Rs, $)';
 
+

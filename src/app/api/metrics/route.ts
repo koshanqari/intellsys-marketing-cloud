@@ -112,26 +112,27 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(metric, { status: 201 });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string; code?: string; detail?: string; constraint?: string };
     console.error('Error creating metric:', error);
     console.error('Error details:', {
-      message: error?.message,
-      code: error?.code,
-      detail: error?.detail,
-      constraint: error?.constraint,
+      message: err?.message,
+      code: err?.code,
+      detail: err?.detail,
+      constraint: err?.constraint,
     });
     
     // Provide more detailed error message
     let message = 'Failed to create metric';
-    if (error?.message?.includes('unique') || error?.constraint?.includes('name_unique')) {
+    if (err?.message?.includes('unique') || err?.constraint?.includes('name_unique')) {
       message = 'A metric with this name already exists';
-    } else if (error?.message) {
-      message = error.message;
+    } else if (err?.message) {
+      message = err.message;
     }
     
     return NextResponse.json({ 
       error: message,
-      details: error?.detail || error?.message 
+      details: err?.detail || err?.message 
     }, { status: 500 });
   }
 }
@@ -182,4 +183,5 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Failed to reorder metrics' }, { status: 500 });
   }
 }
+
 

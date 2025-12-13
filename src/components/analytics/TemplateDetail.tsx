@@ -25,9 +25,15 @@ import {
   ChevronRight,
   Calendar,
   X,
+  Pencil,
+  Trash2,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import Modal from '@/components/ui/Modal';
 import type { MetricConfig, DynamicMetricStat } from '@/lib/types';
 
 interface TemplateMessage {
@@ -78,6 +84,13 @@ function formatRawValue(value: string | number | null | undefined): string {
   if (value === undefined) return 'undefined';
   if (value === '') return '(empty)';
   return String(value);
+}
+
+// Helper to truncate text for table display
+function truncateText(value: string | number | null | undefined, maxLength: number = 30): string {
+  const formatted = formatRawValue(value);
+  if (formatted.length <= maxLength) return formatted;
+  return formatted.substring(0, maxLength) + '...';
 }
 
 // Helper to get filter key for null/empty values
@@ -152,6 +165,43 @@ export default function TemplateDetail({
   const [data, setData] = useState<TemplateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Permissions state
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+
+  // Message detail modal state
+  const [selectedMessage, setSelectedMessage] = useState<TemplateMessage | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<TemplateMessage>>({});
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [detailError, setDetailError] = useState('');
+
+  // Fetch permissions on mount
+  useEffect(() => {
+    const fetchPermissions = async () => {
+      try {
+        const response = await fetch('/api/auth/session');
+        if (response.ok) {
+          const sessionData = await response.json();
+          if (sessionData.isAdmin) {
+            setIsSuperAdmin(true);
+            setCanEdit(true);
+            setCanDelete(true);
+          } else if (sessionData.permissions) {
+            setCanEdit(sessionData.permissions.analytics_edit === true);
+            setCanDelete(sessionData.permissions.analytics_delete === true);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching permissions:', error);
+      }
+    };
+    fetchPermissions();
+  }, []);
 
   // Date range state - default to last 30 days
   const defaultRange = getDateRange('30days');
@@ -367,6 +417,109 @@ export default function TemplateDetail({
   };
 
   const hasActiveFilters = appliedSearchQuery || statusCodeFilters.size > 0 || statusMessageFilters.size > 0 || deliveryStatusFilters.size > 0;
+
+  // Open detail modal for a message
+  const openDetailModal = (message: TemplateMessage) => {
+    setSelectedMessage(message);
+    setEditForm({
+      name: message.name,
+      phone: message.phone,
+      status_code: message.status_code,
+      status_message: message.status_message,
+      message_status: message.message_status,
+      message_status_detailed: message.message_status_detailed,
+    });
+    setIsEditing(false);
+    setDetailError('');
+    setShowDetailModal(true);
+  };
+
+  // Close detail modal
+  const closeDetailModal = () => {
+    setShowDetailModal(false);
+    setSelectedMessage(null);
+    setIsEditing(false);
+    setEditForm({});
+    setDetailError('');
+  };
+
+  // Save message edits
+  const handleSaveEdit = async () => {
+    if (!selectedMessage) return;
+    
+    setSaving(true);
+    setDetailError('');
+    
+    try {
+      const response = await fetch(`/api/message-logs/${selectedMessage.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update message');
+      }
+      
+      const updatedMessage = await response.json();
+      
+      // Update local data
+      if (data) {
+        setData({
+          ...data,
+          messages: data.messages.map(m => 
+            m.id === updatedMessage.id ? updatedMessage : m
+          ),
+        });
+      }
+      
+      setSelectedMessage(updatedMessage);
+      setIsEditing(false);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Delete message
+  const handleDelete = async () => {
+    if (!selectedMessage) return;
+    
+    if (!confirm('Are you sure you want to delete this message log? This action cannot be undone.')) {
+      return;
+    }
+    
+    setDeleting(true);
+    setDetailError('');
+    
+    try {
+      const response = await fetch(`/api/message-logs/${selectedMessage.id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete message');
+      }
+      
+      // Remove from local data
+      if (data) {
+        setData({
+          ...data,
+          messages: data.messages.filter(m => m.id !== selectedMessage.id),
+          total: data.total - 1,
+        });
+      }
+      
+      closeDetailModal();
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : 'Failed to delete message');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -791,41 +944,45 @@ export default function TemplateDetail({
             </thead>
             <tbody className="divide-y divide-[var(--neutral-200)]">
               {paginatedMessages.map((message) => (
-                <tr key={message.id} className="hover:bg-[var(--neutral-50)]">
-                  <td className="px-6 py-4 whitespace-nowrap">
+                <tr 
+                  key={message.id} 
+                  className="hover:bg-[var(--neutral-50)] cursor-pointer transition-colors"
+                  onClick={() => openDetailModal(message)}
+                >
+                  <td className="px-6 py-4 whitespace-nowrap max-w-[180px]">
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2 text-sm font-medium text-[var(--neutral-900)]">
-                        <User className="w-4 h-4 text-[var(--neutral-400)]" />
-                        <span className={message.name === null || message.name === '' ? 'italic text-[var(--neutral-500)]' : ''}>
-                          {formatRawValue(message.name)}
+                        <User className="w-4 h-4 text-[var(--neutral-400)] flex-shrink-0" />
+                        <span className={`truncate ${message.name === null || message.name === '' ? 'italic text-[var(--neutral-500)]' : ''}`}>
+                          {truncateText(message.name, 20)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-[var(--neutral-600)] mt-1">
-                        <Phone className="w-4 h-4 text-[var(--neutral-400)]" />
-                        <span className={message.phone === null || message.phone === '' ? 'italic text-[var(--neutral-500)]' : ''}>
-                          {formatRawValue(message.phone)}
+                        <Phone className="w-4 h-4 text-[var(--neutral-400)] flex-shrink-0" />
+                        <span className={`truncate ${message.phone === null || message.phone === '' ? 'italic text-[var(--neutral-500)]' : ''}`}>
+                          {truncateText(message.phone, 15)}
                         </span>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm max-w-[80px]">
                     <span className={message.status_code === null || message.status_code === undefined ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
                       {formatRawValue(message.status_code)}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={message.status_message === null || message.status_message === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
-                      {formatRawValue(message.status_message)}
+                  <td className="px-6 py-4 text-sm max-w-[200px]">
+                    <span className={`block truncate ${message.status_message === null || message.status_message === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}`}>
+                      {truncateText(message.status_message, 35)}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm max-w-[100px]">
                     <span className={message.message_status === null || message.message_status === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
-                      {formatRawValue(message.message_status)}
+                      {truncateText(message.message_status, 15)}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm max-w-xs truncate">
-                    <span className={message.message_status_detailed === null || message.message_status_detailed === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}>
-                      {formatRawValue(message.message_status_detailed)}
+                  <td className="px-6 py-4 text-sm max-w-[150px]">
+                    <span className={`block truncate ${message.message_status_detailed === null || message.message_status_detailed === '' ? 'italic text-[var(--neutral-500)]' : 'text-[var(--neutral-700)]'}`}>
+                      {truncateText(message.message_status_detailed, 25)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-[var(--neutral-600)]">
@@ -913,6 +1070,258 @@ export default function TemplateDetail({
           </div>
         )}
       </Card>
+
+      {/* Message Detail Modal */}
+      <Modal
+        isOpen={showDetailModal}
+        onClose={closeDetailModal}
+        title="Message Details"
+        size="lg"
+      >
+        {selectedMessage && (
+          <div className="space-y-6">
+            {/* Error Display */}
+            {detailError && (
+              <div className="p-3 bg-[var(--error-light)] border border-[var(--error)] rounded-lg">
+                <p className="text-sm text-[var(--error)]">{detailError}</p>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pb-4 border-b border-[var(--neutral-200)]">
+              {(isSuperAdmin || canEdit) && !isEditing && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setIsEditing(true)}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit
+                </Button>
+              )}
+              {(isSuperAdmin || canDelete) && (
+                <Button
+                  variant="secondary"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="text-[var(--error)] border-[var(--error)] hover:bg-[var(--error-light)]"
+                >
+                  {deleting ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 mr-2" />
+                  )}
+                  Delete
+                </Button>
+              )}
+              {isEditing && (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditForm({
+                        name: selectedMessage.name,
+                        phone: selectedMessage.phone,
+                        status_code: selectedMessage.status_code,
+                        status_message: selectedMessage.status_message,
+                        message_status: selectedMessage.message_status,
+                        message_status_detailed: selectedMessage.message_status_detailed,
+                      });
+                    }}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveEdit}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4 mr-2" />
+                    )}
+                    Save Changes
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {/* Detail Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* ID - Read only */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Message ID
+                </label>
+                <p className="text-sm text-[var(--neutral-900)] font-mono bg-[var(--neutral-50)] px-3 py-2 rounded-lg break-all">
+                  {selectedMessage.id}
+                </p>
+              </div>
+
+              {/* Name */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Name
+                </label>
+                {isEditing ? (
+                  <Input
+                    value={editForm.name || ''}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value || null })}
+                    placeholder="Enter name"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] break-words ${
+                    selectedMessage.name === null || selectedMessage.name === '' 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.name)}
+                  </p>
+                )}
+              </div>
+
+              {/* Phone */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Phone
+                </label>
+                {isEditing ? (
+                  <Input
+                    value={editForm.phone || ''}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value || null })}
+                    placeholder="Enter phone"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] break-words ${
+                    selectedMessage.phone === null || selectedMessage.phone === '' 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.phone)}
+                  </p>
+                )}
+              </div>
+
+              {/* Status Code */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Status Code
+                </label>
+                {isEditing ? (
+                  <Input
+                    type="number"
+                    value={editForm.status_code ?? ''}
+                    onChange={(e) => setEditForm({ 
+                      ...editForm, 
+                      status_code: e.target.value ? parseInt(e.target.value) : null 
+                    })}
+                    placeholder="Enter status code"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] ${
+                    selectedMessage.status_code === null 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.status_code)}
+                  </p>
+                )}
+              </div>
+
+              {/* Delivery Status */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Delivery Status
+                </label>
+                {isEditing ? (
+                  <Input
+                    value={editForm.message_status || ''}
+                    onChange={(e) => setEditForm({ ...editForm, message_status: e.target.value || null })}
+                    placeholder="Enter delivery status"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] break-words ${
+                    selectedMessage.message_status === null || selectedMessage.message_status === '' 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.message_status)}
+                  </p>
+                )}
+              </div>
+
+              {/* Status Message - Full width for long content */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Status Message
+                </label>
+                {isEditing ? (
+                  <textarea
+                    value={editForm.status_message || ''}
+                    onChange={(e) => setEditForm({ ...editForm, status_message: e.target.value || null })}
+                    placeholder="Enter status message"
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm border border-[var(--neutral-200)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] break-words whitespace-pre-wrap ${
+                    selectedMessage.status_message === null || selectedMessage.status_message === '' 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.status_message)}
+                  </p>
+                )}
+              </div>
+
+              {/* Status Details - Full width for long content */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Status Details
+                </label>
+                {isEditing ? (
+                  <textarea
+                    value={editForm.message_status_detailed || ''}
+                    onChange={(e) => setEditForm({ ...editForm, message_status_detailed: e.target.value || null })}
+                    placeholder="Enter status details"
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm border border-[var(--neutral-200)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent resize-none"
+                  />
+                ) : (
+                  <p className={`text-sm px-3 py-2 rounded-lg bg-[var(--neutral-50)] break-words whitespace-pre-wrap ${
+                    selectedMessage.message_status_detailed === null || selectedMessage.message_status_detailed === '' 
+                      ? 'italic text-[var(--neutral-500)]' 
+                      : 'text-[var(--neutral-900)]'
+                  }`}>
+                    {formatRawValue(selectedMessage.message_status_detailed)}
+                  </p>
+                )}
+              </div>
+
+              {/* Created At - Read only */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Created At
+                </label>
+                <p className="text-sm text-[var(--neutral-900)] px-3 py-2 rounded-lg bg-[var(--neutral-50)]">
+                  {formatDate(selectedMessage.created_at)}
+                </p>
+              </div>
+
+              {/* Updated At - Read only */}
+              <div>
+                <label className="block text-sm font-medium text-[var(--neutral-600)] mb-1">
+                  Updated At
+                </label>
+                <p className="text-sm text-[var(--neutral-900)] px-3 py-2 rounded-lg bg-[var(--neutral-50)]">
+                  {formatDate(selectedMessage.updated_at)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

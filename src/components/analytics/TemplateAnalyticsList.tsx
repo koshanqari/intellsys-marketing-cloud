@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Search,
@@ -8,17 +8,6 @@ import {
   ArrowRight,
   RefreshCw,
   AlertCircle,
-  Send,
-  CheckCircle2,
-  Eye,
-  MessageSquare,
-  Clock,
-  Mail,
-  BarChart3,
-  TrendingUp,
-  Activity,
-  Circle,
-  Phone,
 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -38,27 +27,6 @@ interface AnalyticsData {
   metrics: MetricConfig[];
 }
 
-// Icon mapping for dynamic metrics
-const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
-  Send,
-  CheckCircle2,
-  Eye,
-  AlertCircle,
-  Clock,
-  MessageSquare,
-  Mail,
-  RefreshCw,
-  BarChart3,
-  TrendingUp,
-  Activity,
-  Circle,
-  Phone,
-};
-
-function getIconComponent(iconName: string) {
-  return ICON_MAP[iconName] || Circle;
-}
-
 interface TemplateAnalyticsListProps {
   basePath: string; // '/dashboard' or '/portal'
   loginPath: string; // '/login' or '/portal/login'
@@ -76,7 +44,7 @@ export default function TemplateAnalyticsList({
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchAnalytics = async (showRefresh = false) => {
+  const fetchAnalytics = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     
     try {
@@ -102,11 +70,11 @@ export default function TemplateAnalyticsList({
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [router, loginPath, clientsPath]);
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [fetchAnalytics]);
 
   const filteredTemplates = data?.templateStatsWithMetrics.filter(template =>
     template.template_name.toLowerCase().includes(searchQuery.toLowerCase())
